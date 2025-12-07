@@ -8,7 +8,7 @@ from search.strategies import MCTS
 from storage.filesystem import FileSystemStore
 
 # Sampler from run_translation.py
-async def translation_sampler(node):
+async def translation_sampler(node, metadata=None):
     if node.depth == 0: return [0, 1, 2]
     elif node.depth == 1: return [0, 1]
     return []

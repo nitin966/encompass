@@ -22,6 +22,7 @@ class ExecutionEngine:
     def __init__(self):
         # Cache: history_hash -> (score, last_signal, is_terminal, final_result)
         self._cache = {}
+        self._effect_cache = {} # effect_key -> result (Global Memoization)
 
     def _compute_history_hash(self, history: List[Any]) -> str:
         """
@@ -107,12 +108,36 @@ class ExecutionEngine:
                 
                 if isinstance(signal, Effect):
                     # Auto-Execute Side Effect
-                    # TODO: In a real system, we might want to async await this if func is async
-                    # For now, assume sync or handle async specially
-                    if asyncio.iscoroutinefunction(signal.func):
-                         result = await signal.func(*signal.args, **signal.kwargs)
+                    
+                    # 1. Compute Cache Key
+                    # Use the key provided by the user, or derive one
+                    effect_key = signal.key
+                    if effect_key is None:
+                        # Fallback: Hash of (func_name, args_hash)
+                        # We need a robust args hash. For now, str() is a weak fallback but works for basic types.
+                        # In production, use the JSON/MD5 logic from safety.py
+                        try:
+                            import json
+                            import hashlib
+                            payload = str(signal.args) + str(signal.kwargs) # Simple stringification
+                            arg_hash = hashlib.md5(payload.encode('utf-8')).hexdigest()
+                            effect_key = f"{signal.func.__module__}.{signal.func.__name__}:{arg_hash}"
+                        except Exception:
+                            effect_key = None # Cannot cache reliably
+                    
+                    # 2. Check Global Cache (Memoization)
+                    if effect_key and effect_key in self._effect_cache:
+                        result = self._effect_cache[effect_key]
                     else:
-                         result = signal.func(*signal.args, **signal.kwargs)
+                        # 3. Execute
+                        if asyncio.iscoroutinefunction(signal.func):
+                             result = await signal.func(*signal.args, **signal.kwargs)
+                        else:
+                             result = signal.func(*signal.args, **signal.kwargs)
+                        
+                        # 4. Cache
+                        if effect_key:
+                            self._effect_cache[effect_key] = result
                     
                     # Store result in history
                     current_history.append(result)

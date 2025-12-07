@@ -19,12 +19,13 @@ class BeamSearch:
         width: The beam width (number of top candidates to keep at each depth).
         max_depth: Maximum depth to search.
     """
-    def __init__(self, store: StateStore, engine: ExecutionEngine, sampler: Callable, width: int = 3, max_depth: int = 10):
+    def __init__(self, store: StateStore, engine: ExecutionEngine, sampler: Callable, width: int = 3, max_depth: int = 10, diversity_penalty: float = 0.0):
         self.store = store
         self.engine = engine
         self.sampler = sampler
         self.width = width
         self.max_depth = max_depth
+        self.diversity_penalty = diversity_penalty
 
     async def search(self, agent_factory: Callable) -> List[SearchNode]:
         root = self.engine.create_root()
@@ -68,8 +69,43 @@ class BeamSearch:
                     self.visited.add(child)
             
             # Sort candidates by score
-            candidates.sort(key=lambda item: item[0].score, reverse=True)
-            frontier = candidates[:self.width]
+            # Diversity: Penalize nodes that share the same parent to encourage breadth
+            # Adjusted Score = Score - (diversity_penalty * sibling_count)
+            if self.diversity_penalty > 0:
+                parent_counts = {}
+                for node, _ in candidates:
+                    parent_counts[node.parent_id] = parent_counts.get(node.parent_id, 0) + 1
+                
+                # Re-sort with penalty
+                # We want to pick the best, but if we pick many from same parent, their effective score drops?
+                # Actually, we should select iteratively.
+                selected = []
+                temp_candidates = list(candidates)
+                temp_candidates.sort(key=lambda x: x[0].score, reverse=True)
+                
+                counts = {}
+                while len(selected) < self.width and temp_candidates:
+                    # Find best adjusted score
+                    best_idx = -1
+                    best_val = float('-inf')
+                    
+                    for i, (node, _) in enumerate(temp_candidates):
+                        cnt = counts.get(node.parent_id, 0)
+                        adj_score = node.score - (self.diversity_penalty * cnt)
+                        if adj_score > best_val:
+                            best_val = adj_score
+                            best_idx = i
+                    
+                    if best_idx != -1:
+                        item = temp_candidates.pop(best_idx)
+                        selected.append(item)
+                        counts[item[0].parent_id] = counts.get(item[0].parent_id, 0) + 1
+                    else:
+                        break
+                frontier = selected
+            else:
+                candidates.sort(key=lambda item: item[0].score, reverse=True)
+                frontier = candidates[:self.width]
             
         # Add any remaining frontier nodes to completed if they are terminal or just return all visited
         # Return all visited nodes, sorted by score
@@ -239,3 +275,115 @@ class BestOfNSearch:
         # Sort by score
         results.sort(key=lambda n: n.score, reverse=True)
         return results
+
+class BFS:
+    """Breadth-First Search."""
+    def __init__(self, store: StateStore, engine: ExecutionEngine, sampler: Callable, max_depth: int = 10):
+        self.store = store
+        self.engine = engine
+        self.sampler = sampler
+        self.max_depth = max_depth
+
+    async def search(self, agent_factory: Callable) -> List[SearchNode]:
+        root = self.engine.create_root()
+        root, signal = await self.engine.step(agent_factory, root, None)
+        self.store.save_node(root)
+        
+        queue = [(root, signal)]
+        visited = {root}
+        
+        while queue:
+            node, signal = queue.pop(0)
+            
+            if node.is_terminal or node.depth >= self.max_depth:
+                continue
+                
+            meta = signal.metadata if isinstance(signal, BranchPoint) else {}
+            inputs = await self.sampler(node, meta)
+            
+            for inp in inputs:
+                child, new_signal = await self.engine.step(agent_factory, node, inp)
+                self.store.save_node(child)
+                visited.add(child)
+                queue.append((child, new_signal))
+                
+        return list(visited)
+
+class DFS:
+    """Depth-First Search."""
+    def __init__(self, store: StateStore, engine: ExecutionEngine, sampler: Callable, max_depth: int = 10):
+        self.store = store
+        self.engine = engine
+        self.sampler = sampler
+        self.max_depth = max_depth
+
+    async def search(self, agent_factory: Callable) -> List[SearchNode]:
+        root = self.engine.create_root()
+        root, signal = await self.engine.step(agent_factory, root, None)
+        self.store.save_node(root)
+        
+        stack = [(root, signal)]
+        visited = {root}
+        
+        while stack:
+            node, signal = stack.pop()
+            
+            if node.is_terminal or node.depth >= self.max_depth:
+                continue
+                
+            meta = signal.metadata if isinstance(signal, BranchPoint) else {}
+            inputs = await self.sampler(node, meta)
+            
+            # Reverse inputs to preserve order when popping from stack
+            for inp in reversed(inputs):
+                child, new_signal = await self.engine.step(agent_factory, node, inp)
+                self.store.save_node(child)
+                visited.add(child)
+                stack.append((child, new_signal))
+                
+        return list(visited)
+
+class BestFirstSearch:
+    """Best-First Search using a Priority Queue on scores."""
+    def __init__(self, store: StateStore, engine: ExecutionEngine, sampler: Callable, max_depth: int = 10, beam_width: int = 1000):
+        self.store = store
+        self.engine = engine
+        self.sampler = sampler
+        self.max_depth = max_depth
+        self.beam_width = beam_width # Soft limit to prevent explosion
+
+    async def search(self, agent_factory: Callable) -> List[SearchNode]:
+        import heapq
+        
+        root = self.engine.create_root()
+        root, signal = await self.engine.step(agent_factory, root, None)
+        self.store.save_node(root)
+        
+        # Min-heap, so store negative score
+        pq = [(-root.score, 0, root, signal)] # (neg_score, tie_breaker, node, signal)
+        visited = {root}
+        count = 0
+        
+        while pq:
+            neg_score, _, node, signal = heapq.heappop(pq)
+            
+            if node.is_terminal or node.depth >= self.max_depth:
+                continue
+                
+            meta = signal.metadata if isinstance(signal, BranchPoint) else {}
+            inputs = await self.sampler(node, meta)
+            
+            for inp in inputs:
+                child, new_signal = await self.engine.step(agent_factory, node, inp)
+                self.store.save_node(child)
+                visited.add(child)
+                
+                count += 1
+                heapq.heappush(pq, (-child.score, count, child, new_signal))
+                
+            # Prune if too large
+            if len(pq) > self.beam_width:
+                pq = heapq.nsmallest(self.beam_width, pq)
+                heapq.heapify(pq)
+                
+        return list(visited)
