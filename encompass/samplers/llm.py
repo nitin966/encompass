@@ -11,7 +11,7 @@ class LLMSampler:
     def __init__(self, llm: LanguageModel):
         self.llm = llm
 
-    def __call__(self, node: SearchNode) -> List[Any]:
+    async def __call__(self, node: SearchNode) -> List[Any]:
         # If the node represents a BranchPoint, we might have metadata
         # In this simple implementation, we assume the agent logic defines the options
         # and we are just selecting them. 

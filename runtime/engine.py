@@ -21,7 +21,7 @@ class ExecutionEngine:
         # Cache: tuple(history) -> (score, last_signal, is_terminal, final_result)
         self._cache = {}
 
-    def step(self, agent_factory: Callable[[], Generator], node: SearchNode, input_value: Any = None) -> Tuple[SearchNode, Union[ControlSignal, None]]:
+    async def step(self, agent_factory: Callable[[], Generator], node: SearchNode, input_value: Any = None) -> Tuple[SearchNode, Union[ControlSignal, None]]:
         """
         Executes one step of the agent by replaying history and injecting the new input.
         

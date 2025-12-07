@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from typing import List, Callable, Any
 from runtime.engine import ExecutionEngine
 from storage.base import StateStore
@@ -14,12 +15,12 @@ class BeamSearch:
         self.width = width
         self.max_depth = max_depth
 
-    def search(self, agent_factory: Callable) -> List:
+    async def search(self, agent_factory: Callable) -> List:
         # Create root (empty history)
         root = self.engine.create_root()
         
         # Prime the root
-        root, _ = self.engine.step(agent_factory, root, None)
+        root, _ = await self.engine.step(agent_factory, root, None)
         self.store.save_node(root)
         
         frontier = [root]
@@ -31,15 +32,26 @@ class BeamSearch:
             
             candidates = []
             
-            for node in frontier:
-                if node.is_terminal:
-                    completed.append(node)
-                    continue
-                
-                inputs = self.sampler(node)
-                
+            # Parallel Sampling: Get inputs for all nodes in frontier at once
+            # We assume sampler is async
+            tasks = [self.sampler(node) for node in frontier if not node.is_terminal]
+            
+            # Map back results to nodes
+            # Note: We need to handle terminal nodes carefully.
+            # Let's filter frontier to only non-terminal first
+            active_nodes = [n for n in frontier if not n.is_terminal]
+            terminal_nodes = [n for n in frontier if n.is_terminal]
+            completed.extend(terminal_nodes)
+            
+            if not active_nodes:
+                break
+
+            inputs_list = await asyncio.gather(*[self.sampler(n) for n in active_nodes])
+            
+            # Now expand
+            for node, inputs in zip(active_nodes, inputs_list):
                 for inp in inputs:
-                    child, signal = self.engine.step(agent_factory, node, inp)
+                    child, signal = await self.engine.step(agent_factory, node, inp)
                     self.store.save_node(child)
                     candidates.append(child)
                     self.visited.add(child)
@@ -75,13 +87,13 @@ class MCTS:
         self.visits = {} # Map id -> int
         self.values = {} # Map id -> float (total score)
 
-    def search(self, agent_factory: Callable) -> List:
+    async def search(self, agent_factory: Callable) -> List:
         import math
         import random
         
         # Initialize Root
         root = self.engine.create_root()
-        root, _ = self.engine.step(agent_factory, root, None)
+        root, _ = await self.engine.step(agent_factory, root, None)
         self.store.save_node(root)
         
         self.nodes[root.node_id] = root
@@ -119,10 +131,10 @@ class MCTS:
                 
             # Expansion
             if not node.is_terminal:
-                inputs = self.sampler(node)
+                inputs = await self.sampler(node)
                 new_children = []
                 for inp in inputs:
-                    child, _ = self.engine.step(agent_factory, node, inp)
+                    child, _ = await self.engine.step(agent_factory, node, inp)
                     self.store.save_node(child)
                     new_children.append(child)
                     
@@ -139,11 +151,11 @@ class MCTS:
             # Simulation (Rollout)
             rollout_node = node
             while not rollout_node.is_terminal:
-                possible_inputs = self.sampler(rollout_node)
+                possible_inputs = await self.sampler(rollout_node)
                 if not possible_inputs:
                     break 
                 action = random.choice(possible_inputs)
-                rollout_node, _ = self.engine.step(agent_factory, rollout_node, action)
+                rollout_node, _ = await self.engine.step(agent_factory, rollout_node, action)
             
             rollout_score = rollout_node.score
 

@@ -8,12 +8,12 @@ from search.strategies import MCTS
 from storage.filesystem import FileSystemStore
 
 # Sampler from run_translation.py
-def translation_sampler(node):
+async def translation_sampler(node):
     if node.depth == 0: return [0, 1, 2]
     elif node.depth == 1: return [0, 1]
     return []
 
-class TestTranslationE2E(unittest.TestCase):
+class TestTranslationE2E(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         if os.path.exists("encompass_trace_e2e"):
             shutil.rmtree("encompass_trace_e2e")
@@ -26,7 +26,7 @@ class TestTranslationE2E(unittest.TestCase):
         if os.path.exists("encompass_trace_e2e"):
             shutil.rmtree("encompass_trace_e2e")
 
-    def test_translation_flow_mcts(self):
+    async def test_translation_flow_mcts(self):
         """
         Runs the full translation agent with MCTS and verifies it finds the optimal solution.
         """
@@ -38,7 +38,7 @@ class TestTranslationE2E(unittest.TestCase):
             exploration_weight=1.0
         )
         
-        results = mcts.search(self.agent)
+        results = await mcts.search(self.agent)
         results.sort(key=lambda n: n.score, reverse=True)
         
         self.assertTrue(len(results) > 0)

@@ -95,3 +95,15 @@ python3 -m unittest discover tests
 - `storage/`: State persistence.
 - `examples/`: Example agents.
 - `tests/`: Unit and End-to-End tests.
+
+## Critical Best Practices
+
+### 1. Pure Logic Only (No Side Effects)
+EnCompass uses a **Replay Architecture**. This means your agent function is re-executed from the beginning for every step of the search.
+- **DO NOT** perform side effects (e.g., sending emails, writing to DBs, API calls) inside the agent generator unless they are guarded or idempotent.
+- **DO NOT** initialize heavy resources (e.g., DB connections) inside the generator. Pass them in or use a global singleton.
+
+### 2. Determinism
+The replay mechanism relies on the agent code being **deterministic** between `yield` statements.
+- **Avoid** using `random.random()` or `datetime.now()` directly in the logic.
+- If you need randomness, pass it in as an input via `branchpoint`.
