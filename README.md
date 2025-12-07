@@ -50,7 +50,7 @@ from storage.filesystem import FileSystemStore
 from search.strategies import BeamSearch
 
 # Define a sampler (returns possible inputs for a node)
-async def sampler(node):
+async def sampler(node, metadata=None):
     return [0, 1]
 
 async def main():

@@ -13,11 +13,15 @@ class OpenAIFunctionSampler:
         self.api_key = api_key
         self.model = model
 
-    async def __call__(self, node: SearchNode) -> List[Any]:
+    async def __call__(self, node: SearchNode, metadata: Dict[str, Any] = None) -> List[Any]:
+        # Construct prompt from history and metadata
+        prompt = f"History: {node.trace_history}\n"
+        if metadata:
+            prompt += f"Context: {metadata}\n"
         # 1. Extract Schema from Node Metadata
         # In a real app, the BranchPoint would carry the schema
         schema = node.metadata.get('schema')
-        prompt = node.metadata.get('prompt', 'Select the next best action.')
+        # The original prompt from node.metadata is now superseded by the constructed prompt
         
         if not schema:
             # Fallback to simple options if no schema

@@ -9,7 +9,7 @@ from storage.filesystem import FileSystemStore
 from visualization.exporter import export_to_dot
 
 # 1. Define a Sampler (Async)
-async def translation_sampler(node):
+async def translation_sampler(node, metadata=None):
     """
     A simple sampler that returns valid indices for the translation agent's choices.
     In a real scenario, this would use an LLM to generate options.

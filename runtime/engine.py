@@ -19,8 +19,26 @@ class ExecutionEngine:
         return SearchNode(trace_history=[], depth=0, action_taken="<init>")
 
     def __init__(self):
-        # Cache: tuple(history) -> (score, last_signal, is_terminal, final_result)
+        # Cache: history_hash -> (score, last_signal, is_terminal, final_result)
         self._cache = {}
+
+    def _compute_history_hash(self, history: List[Any]) -> str:
+        """
+        Computes a robust hash for the history.
+        Tries to use JSON for stability, falls back to string representation.
+        """
+        import json
+        import hashlib
+        
+        try:
+            # Try JSON serialization with sorted keys for determinism
+            serialized = json.dumps(history, sort_keys=True)
+        except (TypeError, ValueError):
+            # Fallback: String representation of the tuple
+            # This is less safe for objects with identical __str__ but better than crashing
+            serialized = str(tuple(history))
+            
+        return hashlib.md5(serialized.encode('utf-8')).hexdigest()
 
     async def step(self, agent_factory: Callable[[], Generator], node: SearchNode, input_value: Any = None) -> Tuple[SearchNode, Union[ControlSignal, None]]:
         """
@@ -34,20 +52,13 @@ class ExecutionEngine:
         Returns:
             Tuple of (new_child_node, last_signal_received).
         """
-        import json
-        
         # Construct new history
         new_history = list(node.trace_history)
         if input_value is not None:
             new_history.append(input_value)
             
         # Check Cache
-        # Use JSON dump for robust serialization of primitive types
-        try:
-            history_key = json.dumps(new_history, sort_keys=True)
-        except TypeError:
-            # Fallback for non-serializable types (though inputs should be serializable)
-            history_key = tuple(str(x) for x in new_history)
+        history_key = self._compute_history_hash(new_history)
 
         if history_key in self._cache:
             current_score, last_signal, is_done, final_result = self._cache[history_key]
@@ -75,6 +86,9 @@ class ExecutionEngine:
                         signal = gen.send(stored_input)
                     elif not isinstance(signal, (BranchPoint, ScoreSignal)):
                          raise TypeError(f"Agent yielded unexpected type: {type(signal)}. Expected BranchPoint or ScoreSignal.")
+                    else:
+                        # Should not happen if logic is correct, but safety net
+                        pass
 
                 # Frontier Phase: Consume trailing scores
                 while isinstance(signal, ScoreSignal):
@@ -82,6 +96,10 @@ class ExecutionEngine:
                     signal = next(gen)
                     
                 last_signal = signal
+                
+                # Validate final signal type if not done
+                if not isinstance(signal, (BranchPoint, ScoreSignal)) and not is_done:
+                     raise TypeError(f"Agent yielded unexpected type: {type(signal)}. Expected BranchPoint or ScoreSignal.")
 
             except StopIteration as e:
                 is_done = True

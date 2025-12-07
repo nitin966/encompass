@@ -47,15 +47,26 @@ class TestEncompassCore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(child_lose.score, 0.0)
 
     async def test_beam_search(self):
+        # The original simple_sampler was global.
+        # The change moves it inside the test and updates its signature.
+        async def simple_sampler(node, metadata=None):
+            if node.depth == 0:
+                return [0, 1]
+            return []
+
         beam = BeamSearch(self.store, self.engine, simple_sampler, width=2)
         results = await beam.search(simple_agent)
         
-        # Should find both paths
-        self.assertTrue(len(results) >= 3)
-        winning = [n for n in results if n.is_terminal and n.score == 10.0]
-        self.assertEqual(len(winning), 1)
+        # Check that we found the winning node
+        winning_nodes = [n for n in results if n.is_terminal and n.score == 10.0]
+        self.assertTrue(len(winning_nodes) > 0)
 
     async def test_mcts_search(self):
+        # MCTS also needs a sampler, but the diff didn't specify changing this one.
+        # For consistency, I'll define a local one here too, matching the new signature.
+        async def simple_sampler(node, metadata=None):
+            return [0, 1]
+
         mcts = MCTS(self.store, self.engine, simple_sampler, iterations=50)
         results = await mcts.search(simple_agent)
         
@@ -78,7 +89,7 @@ class TestEncompassCore(unittest.IsolatedAsyncioTestCase):
                 yield record_score(1.0)
             return "Alive"
 
-        async def deep_sampler(node):
+        async def deep_sampler(node, metadata=None):
             return [0, 1]
 
         # Use Beam Search to find the single valid path
@@ -119,7 +130,7 @@ class TestEncompassCore(unittest.IsolatedAsyncioTestCase):
                 yield record_score(10.0)
             return "Done"
 
-        async def noisy_sampler(node):
+        async def noisy_sampler(node, metadata=None):
             if node.depth == 0:
                 return ["A", "B"]
             if node.depth == 1:

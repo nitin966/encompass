@@ -2,8 +2,9 @@ import logging
 import asyncio
 from typing import List, Callable, Any
 from runtime.engine import ExecutionEngine
+from runtime.node import SearchNode
 from storage.base import StateStore
-from core.signals import BranchPoint
+from core.signals import BranchPoint, ScoreSignal
 
 logger = logging.getLogger(__name__)
 
@@ -25,87 +26,89 @@ class BeamSearch:
         self.width = width
         self.max_depth = max_depth
 
-    async def search(self, agent_factory: Callable) -> List:
-        # Create root (empty history)
+    async def search(self, agent_factory: Callable) -> List[SearchNode]:
         root = self.engine.create_root()
-        
-        # Prime the root
-        root, _ = await self.engine.step(agent_factory, root, None)
+        # Initial step to get first signal
+        root, signal = await self.engine.step(agent_factory, root, None)
         self.store.save_node(root)
         
-        frontier = [root]
+        # Frontier is list of (node, signal) tuples
+        frontier = [(root, signal)]
         self.visited = {root}
         completed = []
-
+        
         for d in range(self.max_depth):
-            if not frontier: break
-            
-            candidates = []
-            
-            # Parallel Sampling: Get inputs for all nodes in frontier at once
-            # We assume sampler is async
-            
-            # Map back results to nodes
-            # Note: We need to handle terminal nodes carefully.
-            # Let's filter frontier to only non-terminal first
-            active_nodes = [n for n in frontier if not n.is_terminal]
-            terminal_nodes = [n for n in frontier if n.is_terminal]
-            completed.extend(terminal_nodes)
-            
-            if not active_nodes:
+            if not frontier:
                 break
-
-            inputs_list = await asyncio.gather(*[self.sampler(n) for n in active_nodes])
+                
+            candidates = []
+            active_items = [item for item in frontier if not item[0].is_terminal]
+            terminal_items = [item for item in frontier if item[0].is_terminal]
             
-            # Now expand
-            for node, inputs in zip(active_nodes, inputs_list):
+            # Add terminal nodes to completed
+            completed.extend([n for n, s in terminal_items])
+            
+            if not active_items:
+                break
+            
+            # Parallel Sampling: Pass metadata from the signal
+            # signal is the LAST signal received. If it's a BranchPoint, it has metadata.
+            tasks = []
+            for node, signal in active_items:
+                meta = signal.metadata if isinstance(signal, BranchPoint) else {}
+                tasks.append(self.sampler(node, meta))
+            
+            inputs_list = await asyncio.gather(*tasks)
+            
+            for (node, _), inputs in zip(active_items, inputs_list):
                 for inp in inputs:
-                    child, signal = await self.engine.step(agent_factory, node, inp)
+                    child, new_signal = await self.engine.step(agent_factory, node, inp)
                     self.store.save_node(child)
-                    candidates.append(child)
+                    candidates.append((child, new_signal))
                     self.visited.add(child)
-
-            candidates.sort(key=lambda n: n.score, reverse=True)
+            
+            # Sort candidates by score
+            candidates.sort(key=lambda item: item[0].score, reverse=True)
             frontier = candidates[:self.width]
-
-        completed.extend(frontier)
-        return list(self.visited)
+            
+        # Add any remaining frontier nodes to completed if they are terminal or just return all visited
+        # Return all visited nodes, sorted by score
+        all_nodes = list(self.visited)
+        all_nodes.sort(key=lambda n: n.score, reverse=True)
+        return all_nodes
 
 class MCTS:
     """
-    Monte Carlo Tree Search (MCTS) strategy.
-    
-    Uses UCT (Upper Confidence Bound for Trees) for selection and performs
-    random rollouts to estimate the value of new nodes.
-    
-    Attributes:
-        store: StateStore to save nodes.
-        engine: ExecutionEngine to run the agent.
-        sampler: Function to generate possible actions from a node.
-        iterations: Number of MCTS iterations to run.
-        exploration_weight: UCT exploration constant (Cp).
+    Implements Monte Carlo Tree Search (MCTS) with UCT selection.
     """
-    def __init__(self, store: StateStore, engine: ExecutionEngine, sampler: Callable, iterations=100, exploration_weight=1.41):
+    def __init__(self, store: StateStore, engine: ExecutionEngine, sampler: Callable, iterations: int = 100, exploration_weight: float = 1.414):
         self.store = store
         self.engine = engine
         self.sampler = sampler
         self.iterations = iterations
         self.exploration_weight = exploration_weight
-        self.nodes = {} # Map id -> node
-        self.children = {} # Map id -> list of children nodes
-        self.visits = {} # Map id -> int
-        self.values = {} # Map id -> float (total score)
+        
+        self.nodes = {}  # node_id -> SearchNode
+        self.children = {} # node_id -> List[SearchNode]
+        self.visits = {} # node_id -> int
+        self.values = {} # node_id -> float (total value)
+        self.signals = {} # node_id -> ControlSignal (to store metadata)
+        
+        # Min-Max tracking for normalization
+        self.min_score = float('inf')
+        self.max_score = float('-inf')
 
-    async def search(self, agent_factory: Callable) -> List:
+    async def search(self, agent_factory: Callable) -> List[SearchNode]:
         import math
         import random
         
         # Initialize Root
         root = self.engine.create_root()
-        root, _ = await self.engine.step(agent_factory, root, None)
+        root, signal = await self.engine.step(agent_factory, root, None)
         self.store.save_node(root)
         
         self.nodes[root.node_id] = root
+        self.signals[root.node_id] = signal
         self.visits[root.node_id] = 0
         self.values[root.node_id] = 0.0
         
@@ -115,7 +118,7 @@ class MCTS:
             
             # Selection
             while node.node_id in self.children and self.children[node.node_id]:
-                # UCT Selection
+                # UCT Selection with Normalization
                 best_child = None
                 best_uct = -float('inf')
                 
@@ -127,9 +130,15 @@ class MCTS:
                     if self.visits[child.node_id] == 0:
                         uct = float('inf')
                     else:
-                        q = self.values[child.node_id] / self.visits[child.node_id]
+                        # Normalize Q value
+                        q_val = self.values[child.node_id] / self.visits[child.node_id]
+                        if self.max_score > self.min_score:
+                            q_normalized = (q_val - self.min_score) / (self.max_score - self.min_score)
+                        else:
+                            q_normalized = q_val # Fallback if no range yet
+                            
                         u = self.exploration_weight * math.sqrt(math.log(self.visits[node.node_id]) / self.visits[child.node_id])
-                        uct = q + u
+                        uct = q_normalized + u
                     
                     if uct > best_uct:
                         best_uct = uct
@@ -137,17 +146,22 @@ class MCTS:
                 
                 node = best_child
                 path.append(node)
-                
+            
             # Expansion
             if not node.is_terminal:
-                inputs = await self.sampler(node)
+                # Get metadata from stored signal
+                signal = self.signals.get(node.node_id)
+                meta = signal.metadata if isinstance(signal, BranchPoint) else {}
+                
+                inputs = await self.sampler(node, meta)
                 new_children = []
                 for inp in inputs:
-                    child, _ = await self.engine.step(agent_factory, node, inp)
+                    child, new_signal = await self.engine.step(agent_factory, node, inp)
                     self.store.save_node(child)
                     new_children.append(child)
                     
                     self.nodes[child.node_id] = child
+                    self.signals[child.node_id] = new_signal
                     self.visits[child.node_id] = 0
                     self.values[child.node_id] = 0.0
                 
@@ -156,24 +170,38 @@ class MCTS:
                 if new_children:
                     node = random.choice(new_children)
                     path.append(node)
-
-            # Simulation (Rollout)
-            rollout_node = node
-            while not rollout_node.is_terminal:
-                possible_inputs = await self.sampler(rollout_node)
-                if not possible_inputs:
-                    break 
-                action = random.choice(possible_inputs)
-                rollout_node, _ = await self.engine.step(agent_factory, rollout_node, action)
             
-            rollout_score = rollout_node.score
-
+            # Simulation (Rollout)
+            # Simple random rollout until terminal
+            current_rollout_node = node
+            rollout_signal = self.signals.get(current_rollout_node.node_id)
+            
+            while not current_rollout_node.is_terminal:
+                meta = rollout_signal.metadata if isinstance(rollout_signal, BranchPoint) else {}
+                possible_inputs = await self.sampler(current_rollout_node, meta)
+                if not possible_inputs:
+                    break
+                action = random.choice(possible_inputs)
+                current_rollout_node, rollout_signal = await self.engine.step(agent_factory, current_rollout_node, action)
+            
+            rollout_score = current_rollout_node.score
+            
+            # Update Min-Max for normalization
+            self.min_score = min(self.min_score, rollout_score)
+            self.max_score = max(self.max_score, rollout_score)
+            
             # Backpropagation
             for n in path:
+                if n.node_id not in self.visits: self.visits[n.node_id] = 0
+                if n.node_id not in self.values: self.values[n.node_id] = 0.0
+                
                 self.visits[n.node_id] += 1
                 self.values[n.node_id] += rollout_score
 
-        return list(self.nodes.values())
+        # Return all visited nodes, sorted by visit count (most robust metric for MCTS)
+        all_nodes = list(self.nodes.values())
+        all_nodes.sort(key=lambda n: self.visits.get(n.node_id, 0), reverse=True)
+        return all_nodes
 
 class BestOfNSearch:
     """
@@ -186,7 +214,7 @@ class BestOfNSearch:
         self.sampler = sampler
         self.n = n
 
-    async def search(self, agent_factory: Callable) -> List:
+    async def search(self, agent_factory: Callable) -> List[SearchNode]:
         import random
         
         results = []
@@ -194,17 +222,20 @@ class BestOfNSearch:
         for _ in range(self.n):
             # Run one full trajectory
             node = self.engine.create_root()
-            node, _ = await self.engine.step(agent_factory, node, None)
+            node, signal = await self.engine.step(agent_factory, node, None)
             self.store.save_node(node)
             
             while not node.is_terminal:
-                possible_inputs = await self.sampler(node)
+                meta = signal.metadata if isinstance(signal, BranchPoint) else {}
+                possible_inputs = await self.sampler(node, meta)
                 if not possible_inputs:
                     break
                 action = random.choice(possible_inputs)
-                node, _ = await self.engine.step(agent_factory, node, action)
+                node, signal = await self.engine.step(agent_factory, node, action)
                 self.store.save_node(node)
             
             results.append(node)
             
+        # Sort by score
+        results.sort(key=lambda n: n.score, reverse=True)
         return results
