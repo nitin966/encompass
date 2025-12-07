@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from typing import Any, Tuple, Union, Generator, Callable, List
 from runtime.node import SearchNode
 from core.signals import BranchPoint, ScoreSignal, ControlSignal
@@ -42,83 +43,124 @@ class ExecutionEngine:
 
     async def step(self, agent_factory: Callable[[], Generator], node: SearchNode, input_value: Any = None) -> Tuple[SearchNode, Union[ControlSignal, None]]:
         """
-        Executes one step of the agent by replaying history and injecting the new input.
-        
-        Args:
-            agent_factory: Function that returns a new agent generator.
-            node: Current search node (contains history).
-            input_value: New input to inject (action taken).
-            
-        Returns:
-            Tuple of (new_child_node, last_signal_received).
+        Executes the agent.
+        1. Replays history from 'node'.
+        2. Injects 'input_value' (if provided) as the decision for the current BranchPoint.
+        3. Continues execution, handling any 'Effect' signals automatically.
+        4. Stops at the next 'BranchPoint' or termination.
         """
-        # Construct new history
-        new_history = list(node.trace_history)
+        from core.signals import Effect, BranchPoint, ScoreSignal
+        
+        # 1. Construct the history to replay
+        # The node.trace_history contains [choice_0, effect_res_1, choice_2, ...]
+        replay_history = list(node.trace_history)
         if input_value is not None:
-            new_history.append(input_value)
+            replay_history.append(input_value)
             
-        # Check Cache
-        history_key = self._compute_history_hash(new_history)
-
+        # We will build the *new* history for the child node as we go
+        # It starts as a copy of replay_history, but might grow if we encounter NEW effects
+        current_history = list(replay_history)
+        
+        # Check Cache (Optimization)
+        history_key = self._compute_history_hash(current_history)
+        # Note: The cache might return a state that is "in the middle" of effects if we cached poorly.
+        # But our protocol says we only stop at BranchPoints. So cached states are always at BranchPoints.
         if history_key in self._cache:
-            current_score, last_signal, is_done, final_result = self._cache[history_key]
-        else:
-            # Replay Phase
-            gen = agent_factory()
-            
-            current_score = 0.0
-            last_signal = None
-            is_done = False
-            final_result = None
-            
-            try:
-                signal = next(gen)
-                
-                # Replay history
-                for stored_input in new_history:
-                    # Consume score signals
-                    while isinstance(signal, ScoreSignal):
-                        current_score += signal.value
-                        signal = next(gen)
-                    
-                    # Inject stored input at BranchPoint
-                    if isinstance(signal, BranchPoint):
-                        signal = gen.send(stored_input)
-                    elif not isinstance(signal, (BranchPoint, ScoreSignal)):
-                         raise TypeError(f"Agent yielded unexpected type: {type(signal)}. Expected BranchPoint or ScoreSignal.")
-                    else:
-                        # Should not happen if logic is correct, but safety net
-                        pass
+             return self._reconstruct_from_cache(history_key, current_history, node)
 
-                # Frontier Phase: Consume trailing scores
+        # 2. Start Execution
+        gen = agent_factory()
+        current_score = 0.0
+        last_signal = None
+        is_done = False
+        final_result = None
+        
+        try:
+            signal = next(gen)
+            
+            # --- REPLAY PHASE ---
+            # We consume the replay_history items one by one.
+            # Each item corresponds to a yield in the generator (BranchPoint or Effect).
+            
+            for stored_input in replay_history:
+                # 1. Handle Scores (they don't consume history)
                 while isinstance(signal, ScoreSignal):
                     current_score += signal.value
                     signal = next(gen)
-                    
-                last_signal = signal
                 
-                # Validate final signal type if not done
-                if not isinstance(signal, (BranchPoint, ScoreSignal)) and not is_done:
-                     raise TypeError(f"Agent yielded unexpected type: {type(signal)}. Expected BranchPoint or ScoreSignal.")
+                # 2. Inject stored input
+                # Whether it's a BranchPoint (choice) or Effect (result), we just send it back.
+                if isinstance(signal, (BranchPoint, Effect)):
+                    signal = gen.send(stored_input)
+                else:
+                    raise TypeError(f"During replay, expected BranchPoint or Effect, got {type(signal)}")
 
-            except StopIteration as e:
-                is_done = True
-                final_result = e.value
+            # --- FRONTIER PHASE ---
+            # We have exhausted the history. Now we run forward.
+            # We auto-execute Effects until we hit a BranchPoint or Finish.
             
-            # Update Cache
-            self._cache[history_key] = (current_score, last_signal, is_done, final_result)
+            while True:
+                # Consume scores
+                while isinstance(signal, ScoreSignal):
+                    current_score += signal.value
+                    signal = next(gen)
+                
+                if isinstance(signal, Effect):
+                    # Auto-Execute Side Effect
+                    # TODO: In a real system, we might want to async await this if func is async
+                    # For now, assume sync or handle async specially
+                    if asyncio.iscoroutinefunction(signal.func):
+                         result = await signal.func(*signal.args, **signal.kwargs)
+                    else:
+                         result = signal.func(*signal.args, **signal.kwargs)
+                    
+                    # Store result in history
+                    current_history.append(result)
+                    
+                    # Inject result and continue
+                    signal = gen.send(result)
+                    
+                elif isinstance(signal, BranchPoint):
+                    # PAUSE! We need an external decision.
+                    last_signal = signal
+                    break
+                    
+                else:
+                    # Should be impossible if typed correctly, but safety
+                    raise TypeError(f"Unexpected signal type: {type(signal)}")
+
+        except StopIteration as e:
+            is_done = True
+            final_result = e.value
+            
+        # Update Cache
+        # We cache the state at this specific history point (which corresponds to a BranchPoint or End)
+        history_key = self._compute_history_hash(current_history)
+        self._cache[history_key] = (current_score, last_signal, is_done, final_result)
         
         # Create Child Node
-        child_node = SearchNode(
-            trace_history=new_history,
+        child = SearchNode(
+            trace_history=current_history,
             score=current_score,
-            depth=len(new_history),
+            depth=node.depth + 1 if input_value is not None else node.depth, # Depth increments on *choices*? Or steps? Let's say choices.
             parent_id=node.node_id,
             is_terminal=is_done,
-            action_taken=str(input_value)
+            action_taken=str(input_value) if input_value is not None else "<auto>",
+            metadata={'result': final_result} if is_done else {}
         )
         
-        if is_done:
-            child_node.metadata['result'] = final_result
-            
-        return child_node, last_signal
+        return child, last_signal
+
+    def _reconstruct_from_cache(self, key: str, history: List[Any], parent: SearchNode) -> Tuple[SearchNode, Any]:
+        """Helper to reconstruct node from cache."""
+        score, signal, is_done, result = self._cache[key]
+        child = SearchNode(
+            trace_history=history,
+            score=score,
+            depth=parent.depth + 1, # Approx
+            parent_id=parent.node_id,
+            is_terminal=is_done,
+            action_taken="<cached>",
+            metadata={'result': result} if is_done else {}
+        )
+        return child, signal

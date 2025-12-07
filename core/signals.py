@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Dict, Any, Union, Callable
 
 @dataclass(frozen=True)
 class ControlSignal:
@@ -17,6 +17,22 @@ class BranchPoint(ControlSignal):
     """
     name: str
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class Effect(ControlSignal):
+    """
+    Signal indicating a side-effect or IO operation that should be replayed.
+    
+    Attributes:
+        func: The callable to execute.
+        args: Positional arguments.
+        kwargs: Keyword arguments.
+        key: Optional unique key for caching (if not provided, derived from args).
+    """
+    func: Callable
+    args: tuple
+    kwargs: Dict[str, Any]
+    key: Union[str, None] = None
 
 @dataclass(frozen=True)
 class ScoreSignal(ControlSignal):
