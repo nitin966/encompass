@@ -1,21 +1,21 @@
 from typing import Protocol, List, Any
 
 class LanguageModel(Protocol):
-    def generate(self, prompt: str, options: List[str] = None) -> str:
+    async def generate(self, prompt: str, options: List[str] = None) -> str:
         """
         Generate text based on prompt. 
         If options are provided, return one of the options.
         """
         ...
         
-    def score(self, text: str, criteria: str) -> float:
+    async def score(self, text: str, criteria: str) -> float:
         """
         Score the text based on criteria. Returns 0.0 to 1.0.
         """
         ...
 
 class MockLLM:
-    def generate(self, prompt: str, options: List[str] = None) -> str:
+    async def generate(self, prompt: str, options: List[str] = None) -> str:
         # Simple heuristic or random choice for mock
         if options:
             # Deterministic mock: pick the longest option just to have logic
@@ -26,6 +26,6 @@ class MockLLM:
             return options[idx]
         return "Mock response"
 
-    def score(self, text: str, criteria: str) -> float:
+    async def score(self, text: str, criteria: str) -> float:
         # Mock scoring: length based or random
         return 0.8

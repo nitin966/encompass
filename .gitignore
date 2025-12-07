@@ -27,6 +27,7 @@ env/
 ENV/
 
 # EnCompass Traces & Artifacts
+test_traces/
 encompass_trace/
 encompass_trace_test/
 encompass_trace_e2e/

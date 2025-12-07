@@ -46,8 +46,38 @@ class ScoreSignal(ControlSignal):
     value: float
     context: str = ""
 
+@dataclass(frozen=True)
+class Protect(ControlSignal):
+    """
+    Signal to protect a function call with retries/resampling.
+    """
+    func: Callable
+    args: tuple
+    kwargs: Dict[str, Any]
+    attempts: int
+    exceptions: tuple
+
+@dataclass(frozen=True)
+class EarlyStop(ControlSignal):
+    """Signal to stop searching this branch (success)."""
+    pass
+
+@dataclass(frozen=True)
+class KillBranch(ControlSignal):
+    """Signal to prune this branch (failure)."""
+    pass
+
+@dataclass(frozen=True)
+class RecordCosts(ControlSignal):
+    """Signal to record resource usage."""
+    tokens: int
+    dollars: float
+
 def branchpoint(name: str, **metadata) -> BranchPoint:
     return BranchPoint(name=name, metadata=metadata)
 
 def record_score(value: float, context: str = "") -> ScoreSignal:
     return ScoreSignal(value=value, context=context)
+
+def effect(func: Callable, *args, key: Union[str, None] = None, **kwargs) -> Effect:
+    return Effect(func=func, args=args, kwargs=kwargs, key=key)

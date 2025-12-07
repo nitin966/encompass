@@ -2,7 +2,7 @@ import logging
 import asyncio
 from typing import Any, Tuple, Union, Generator, Callable, List
 from runtime.node import SearchNode
-from core.signals import BranchPoint, ScoreSignal, ControlSignal
+from core.signals import BranchPoint, ScoreSignal, Effect, Protect, KillBranch, EarlyStop, RecordCosts, ControlSignal
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,20 @@ class ExecutionEngine:
     def __init__(self):
         # Cache: history_hash -> (score, last_signal, is_terminal, final_result)
         self._cache = {}
-        self._effect_cache = {} # effect_key -> result (Global Memoization)
+        self._cache = {} # history_hash -> (score, last_signal, is_terminal, final_result)
+        self._effect_cache = {} # scope -> effect_key -> result (Scoped Memoization)
+        self._current_scope = "global"
+
+    def set_scope(self, scope: str):
+        """Sets the current caching scope."""
+        self._current_scope = scope
+        if scope not in self._effect_cache:
+            self._effect_cache[scope] = {}
+
+    def clear_scope(self, scope: str):
+        """Clears the cache for a specific scope."""
+        if scope in self._effect_cache:
+            del self._effect_cache[scope]
 
     def _compute_history_hash(self, history: List[Any]) -> str:
         """
@@ -107,43 +120,87 @@ class ExecutionEngine:
                     signal = next(gen)
                 
                 if isinstance(signal, Effect):
-                    # Auto-Execute Side Effect
-                    
-                    # 1. Compute Cache Key
-                    # Use the key provided by the user, or derive one
+                    # ... (Effect handling code is same, just need to preserve it or re-write it)
+                    # I will rewrite it to be safe since I am replacing a block
                     effect_key = signal.key
                     if effect_key is None:
-                        # Fallback: Hash of (func_name, args_hash)
-                        # We need a robust args hash. For now, str() is a weak fallback but works for basic types.
-                        # In production, use the JSON/MD5 logic from safety.py
                         try:
                             import json
                             import hashlib
-                            payload = str(signal.args) + str(signal.kwargs) # Simple stringification
+                            payload = str(signal.args) + str(signal.kwargs)
                             arg_hash = hashlib.md5(payload.encode('utf-8')).hexdigest()
                             effect_key = f"{signal.func.__module__}.{signal.func.__name__}:{arg_hash}"
                         except Exception:
-                            effect_key = None # Cannot cache reliably
+                            effect_key = None
                     
-                    # 2. Check Global Cache (Memoization)
-                    if effect_key and effect_key in self._effect_cache:
-                        result = self._effect_cache[effect_key]
+                    
+                    # 2. Check Scoped Cache (Memoization)
+                    # Ensure scope dict exists
+                    if self._current_scope not in self._effect_cache:
+                        self._effect_cache[self._current_scope] = {}
+                        
+                    scope_cache = self._effect_cache[self._current_scope]
+                    
+                    if effect_key and effect_key in scope_cache:
+                        result = scope_cache[effect_key]
                     else:
-                        # 3. Execute
                         if asyncio.iscoroutinefunction(signal.func):
                              result = await signal.func(*signal.args, **signal.kwargs)
                         else:
                              result = signal.func(*signal.args, **signal.kwargs)
-                        
-                        # 4. Cache
                         if effect_key:
-                            self._effect_cache[effect_key] = result
+                            scope_cache[effect_key] = result
                     
-                    # Store result in history
                     current_history.append(result)
-                    
-                    # Inject result and continue
                     signal = gen.send(result)
+                
+                elif isinstance(signal, Protect):
+                    # Handle Protect: Retry logic
+                    attempts = signal.attempts
+                    last_exc = None
+                    result = None
+                    success = False
+                    
+                    for _ in range(attempts):
+                        try:
+                            if asyncio.iscoroutinefunction(signal.func):
+                                result = await signal.func(*signal.args, **signal.kwargs)
+                            else:
+                                result = signal.func(*signal.args, **signal.kwargs)
+                            success = True
+                            break
+                        except signal.exceptions as e:
+                            last_exc = e
+                            continue
+                    
+                    if not success:
+                        raise last_exc
+                        
+                    current_history.append(result)
+                    signal = gen.send(result)
+
+                elif isinstance(signal, KillBranch):
+                    # Prune branch
+                    # We can raise a special exception or just return None
+                    # Returning None (or special status) stops the loop
+                    # Let's set score to -inf and break
+                    current_score = -1e9
+                    is_done = True
+                    break
+                    
+                elif isinstance(signal, EarlyStop):
+                    # Success
+                    current_score = 1e9
+                    is_done = True
+                    break
+                    
+                elif isinstance(signal, RecordCosts):
+                    # Just record and continue
+                    # In a real system, we'd aggregate this in the Node
+                    # For now, we ignore or log
+                    current_history.append(None) # Ack
+                    signal = gen.send(None)
+                    
                     
                 elif isinstance(signal, BranchPoint):
                     # PAUSE! We need an external decision.
