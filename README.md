@@ -233,8 +233,8 @@ MIT
   author = {Nitin Kesarwani},
   title = {EnCompass: CPS Compiler for Search-Based LLM Agents},
   year = {2025},
-  url = {https://asari.ai/blog/enabling-intelligent-search-for-ai-agents},
-  note = {Validated with 100\% accuracy on GSM8K and depth 100+ search}
+  url = {https://github.com/nitin966/encompass},
+  note = {Validated with 100% accuracy on GSM8K and depth 100+ search}
 }
 ```
 
