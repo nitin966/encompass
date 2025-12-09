@@ -9,7 +9,7 @@ from core.signals import record_costs
 from runtime.engine import ExecutionEngine
 
 
-class TestCostTracking(unittest.TestCase):
+class TestCostTracking(unittest.IsolatedAsyncioTestCase):
     
     async def test_cost_tracking_cps(self):
         """Test that RecordCosts signals are tracked in CPS agents."""
@@ -55,7 +55,7 @@ class TestCostTracking(unittest.TestCase):
         agg.record("node3", tokens_in=50, tokens_out=25, cost_usd=0.005, model="gpt-3.5")
         
         # Check totals
-        self.assertEqual(agg.get_total_cost(), 0.035)
+        self.assertAlmostEqual(agg.get_total_cost(), 0.035)
         
         tokens = agg.get_total_tokens()
         self.assertEqual(tokens['tokens_in'], 350)

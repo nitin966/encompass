@@ -228,7 +228,6 @@ MIT
    booktitle={Conference on Neural Information Processing Systems},
    year={2025}
  }
-)
 @software{encompass2025,
   author = {Nitin Kesarwani},
   title = {EnCompass: CPS Compiler for Search-Based LLM Agents},
