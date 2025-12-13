@@ -17,7 +17,7 @@ def math_agent():
     path = []
     
     for _ in range(5):
-        op = yield branchpoint("op", metadata={"options": ["+1", "+2", "*2"]})
+        op = branchpoint("op", metadata={"options": ["+1", "+2", "*2"]})
         path.append(op)
         
         if op == "+1":
@@ -29,10 +29,10 @@ def math_agent():
             
         # Guide search
         dist = abs(TARGET - current)
-        yield record_score(-dist) # Higher score = closer to target
+        record_score(-dist) # Higher score = closer to target
         
         if current == TARGET:
-            yield record_score(100)
+            record_score(100)
             return path
             
     return path

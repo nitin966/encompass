@@ -8,7 +8,7 @@ class TestCompilerLoops(unittest.IsolatedAsyncioTestCase):
         def agent():
             total = 0
             for i in [1, 2, 3]:
-                x = yield branchpoint("choice", options=[i])
+                x = branchpoint("choice", options=[i])
                 total = total + x
             return total
             
@@ -37,7 +37,7 @@ class TestCompilerLoops(unittest.IsolatedAsyncioTestCase):
         def agent():
             count = 0
             while count < 3:
-                x = yield branchpoint("choice", options=[1])
+                x = branchpoint("choice", options=[1])
                 count = count + 1
             return count
             

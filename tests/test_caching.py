@@ -9,7 +9,7 @@ execution_count = 0
 def counting_agent():
     global execution_count
     execution_count += 1
-    yield branchpoint("start")
+    branchpoint("start")
     return "done"
 
 class TestCaching(unittest.IsolatedAsyncioTestCase):

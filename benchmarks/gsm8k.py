@@ -56,7 +56,7 @@ def create_math_agent(problem_text, expected_answer):
         for i in range(5):
             # BranchPoint for next step
             # Metadata includes the problem to help the Oracle Sampler
-            step = yield branchpoint(f"step_{i}", 
+            step = branchpoint(f"step_{i}", 
                 problem=problem,
                 context=f"Current value: {current_val}"
             )
@@ -68,16 +68,16 @@ def create_math_agent(problem_text, expected_answer):
             if ":" in step:
                 parts = step.split(":", 1)
                 expr = parts[1]
-                val = yield calculator(expr.strip())
+                val = calculator(expr.strip())
                 if val is not None:
                     current_val = val
             
             # Check if we hit the answer
             if current_val == answer:
-                yield record_score(1e9)
+                record_score(1e9)
                 return f"Solved: {current_val}"
         
-        yield record_score(0)
+        record_score(0)
         return f"Failed: {current_val}"
     
     # Return a lambda that creates the agent with the captured arguments

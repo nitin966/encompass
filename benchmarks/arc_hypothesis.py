@@ -33,14 +33,14 @@ def validate_hypothesis(func_code):
 def arc_agent():
     # 1. Generate Hypothesis Code
     # Metadata provides context for the LLM
-    code = yield branchpoint("generate_code", metadata={"input": TASK_INPUT, "output": TASK_OUTPUT})
+    code = branchpoint("generate_code", metadata={"input": TASK_INPUT, "output": TASK_OUTPUT})
     
     # 2. Validate
-    accuracy = yield validate_hypothesis(code)
-    yield record_score(accuracy * 100)
+    accuracy = validate_hypothesis(code)
+    record_score(accuracy * 100)
     
     if accuracy == 1.0:
-        yield early_stop()
+        early_stop()
         return "Solved"
         
     return "Failed"

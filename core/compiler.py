@@ -29,8 +29,9 @@ See docs/CPS_LIMITATIONS.md for details and workarounds.
 """
 
 import dill
+from core.signals import ControlSignal
 
-class AgentMachine:
+class AgentMachine(ControlSignal):
     """
     Base class for compiled state machines.
     
@@ -253,6 +254,131 @@ class CPSCompiler(ast.NodeTransformer):
             # Keep as is (for globals or attributes)
             value = self.visit(node.value)
             self.current_stmts.append(ast.AugAssign(target=node.target, op=node.op, value=value))
+
+    def visit_Call(self, node):
+        # Implicit Yield Logic
+        # 1. Emit call and assign to temp
+        # 2. Check if signal
+        # 3. If signal, yield (return)
+        # 4. If not, continue
+        
+        # We need to visit args first!
+        # But generic_visit doesn't work for Call because we need to restructure.
+        # We must manually visit args and keywords to ensure they are processed (e.g. nested calls)
+        
+        new_args = [self.visit(arg) for arg in node.args]
+        new_keywords = [ast.keyword(arg=k.arg, value=self.visit(k.value)) for k in node.keywords]
+        new_func = self.visit(node.func)
+        
+        # Reconstruct call with visited args
+        call_node = ast.Call(func=new_func, args=new_args, keywords=new_keywords)
+        
+        # Generate temp variable name
+        temp_name = f"_tmp_{self.current_state}_{len(self.current_stmts)}"
+        
+        # 1. Assign result to temp
+        self.current_stmts.append(ast.Assign(
+            targets=[ast.Name(id=temp_name, ctx=ast.Store())],
+            value=call_node
+        ))
+        
+        # 2. Import ControlSignal (if not already imported? We can just assume it's available or import it locally)
+        # Better to import it once at module level, but we are inside a function.
+        # We'll import it inside the check to be safe and local.
+        self.current_stmts.append(ast.ImportFrom(
+            module='core.signals',
+            names=[ast.alias(name='ControlSignal', asname=None)],
+            level=0
+        ))
+        
+        # 3. Check and Split
+        next_state = self.current_state + 1
+        
+        # if isinstance(temp, ControlSignal):
+        if_stmt = ast.If(
+            test=ast.Call(
+                func=ast.Name(id='isinstance', ctx=ast.Load()),
+                args=[
+                    ast.Name(id=temp_name, ctx=ast.Load()),
+                    ast.Name(id='ControlSignal', ctx=ast.Load())
+                ],
+                keywords=[]
+            ),
+            body=[
+                # self._state = next_state
+                ast.Assign(
+                    targets=[ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()), attr='_state', ctx=ast.Store())],
+                    value=ast.Constant(value=next_state)
+                ),
+                # return temp
+                ast.Return(value=ast.Name(id=temp_name, ctx=ast.Load()))
+            ],
+            orelse=[
+                # Not a signal.
+                # Save temp to _ctx so next state can retrieve it (simulating continuation)
+                # self._ctx['_saved_temp'] = temp
+                ast.Assign(
+                    targets=[ast.Subscript(
+                        value=ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()), attr='_ctx', ctx=ast.Load()),
+                        slice=ast.Constant(value=f'_saved_{temp_name}'),
+                        ctx=ast.Store()
+                    )],
+                    value=ast.Name(id=temp_name, ctx=ast.Load())
+                ),
+                # self._state = next_state
+                ast.Assign(
+                    targets=[ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()), attr='_state', ctx=ast.Store())],
+                    value=ast.Constant(value=next_state)
+                ),
+                # continue (loop in run)
+                ast.Continue()
+            ]
+        )
+        self.current_stmts.append(if_stmt)
+        
+        self._flush_state(next_state)
+        
+        # In NEXT STATE:
+        # Retrieve value
+        # if '_saved_temp' in self._ctx:
+        #     val = self._ctx.pop('_saved_temp')
+        # else:
+        #     val = _input
+        
+        val_name = f"_val_{temp_name}"
+        saved_key = f'_saved_{temp_name}'
+        
+        check_saved = ast.If(
+            test=ast.Compare(
+                left=ast.Constant(value=saved_key),
+                ops=[ast.In()],
+                comparators=[ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()), attr='_ctx', ctx=ast.Load())]
+            ),
+            body=[
+                ast.Assign(
+                    targets=[ast.Name(id=val_name, ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()), attr='_ctx', ctx=ast.Load()),
+                            attr='pop',
+                            ctx=ast.Load()
+                        ),
+                        args=[ast.Constant(value=saved_key)],
+                        keywords=[]
+                    )
+                )
+            ],
+            orelse=[
+                ast.Assign(
+                    targets=[ast.Name(id=val_name, ctx=ast.Store())],
+                    value=ast.Name(id='_input', ctx=ast.Load())
+                )
+            ]
+        )
+        self.current_stmts.append(check_saved)
+        
+        # Return the variable name node
+        return ast.Name(id=val_name, ctx=ast.Load())
 
     def visit_Expr(self, node):
         if isinstance(node.value, ast.Yield):
@@ -785,6 +911,17 @@ def compile_agent(func: Callable) -> Type[AgentMachine]:
         for case in cases[1:]:
             current.orelse = [case]
             current = case
+            
+        # Wrap in while True loop to allow internal state transitions
+        run_body = [
+            ast.While(
+                test=ast.Constant(value=True),
+                body=[cases[0]],
+                orelse=[]
+            )
+        ]
+    else:
+        run_body = [ast.Pass()]
             
     # Create class
     class_name = f"{func.__name__}_Machine"

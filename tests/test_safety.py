@@ -18,15 +18,15 @@ def increment_counter(val):
 @encompass_agent
 def risky_agent():
     # This side effect should only happen ONCE per path
-    curr = yield increment_counter(1)
+    curr = increment_counter(1)
     
     # Branching
-    choice = yield branchpoint("decision")
+    choice = branchpoint("decision")
     
     if choice == "A":
-        yield record_score(10)
+        record_score(10)
     else:
-        yield record_score(5)
+        record_score(5)
         
     return "Done"
 

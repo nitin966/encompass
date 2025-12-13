@@ -7,8 +7,8 @@ class TestCPSEngine(unittest.IsolatedAsyncioTestCase):
     async def test_cps_execution(self):
         # Define agent
         def my_agent():
-            x = yield branchpoint("step1")
-            y = yield branchpoint("step2")
+            x = branchpoint("step1")
+            y = branchpoint("step2")
             return x + y
             
         # Compile it

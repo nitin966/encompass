@@ -35,12 +35,12 @@ print("-" * 80)
 @compile
 def simple_agent():
     """Agent with 2 decision points."""
-    choice1 = yield branchpoint("first_choice")
-    choice2 = yield branchpoint("second_choice")
+    choice1 = branchpoint("first_choice")
+    choice2 = branchpoint("second_choice")
     
     # Score based on choices
     score = choice1 + choice2
-    yield record_score(score)
+    record_score(score)
     
     return f"Result: {choice1} + {choice2} = {score}"
 
@@ -77,7 +77,7 @@ print(f"✓ Final result: {result}")
 print("\n3. Testing State Serialization (Pickling)...")
 print("-" * 80)
 
-import pickle
+import dill as pickle
 
 machine2 = simple_agent()
 machine2.run(None)  # First branchpoint
@@ -117,18 +117,20 @@ async def validate_search():
     @compile
     def search_agent():
         """Agent designed to test search depth."""
-        x = yield branchpoint("level_1")
-        y = yield branchpoint("level_2")  
-        z = yield branchpoint("level_3")
+        x = branchpoint("level_1")
+        y = branchpoint("level_2")  
+        z = branchpoint("level_3")
         
         # Score formula that creates clear winner
         score = x * 100 + y * 10 + z
-        yield record_score(score)
+        record_score(score)
         
         return f"Path: {x}-{y}-{z}, Score: {score}"
     
     engine = ExecutionEngine()
+    store = FileSystemStore("validation_trace")
     strategy = BeamSearch(
+        store=store,
         engine=engine,
         sampler=tracking_sampler,
         width=5  # Keep top 5 paths
@@ -169,10 +171,10 @@ async def validate_replay():
     def replay_agent():
         history = []
         for i in range(10):  # 10 decision points
-            choice = yield branchpoint(f"step_{i}")
+            choice = branchpoint(f"step_{i}")
             history.append(choice)
         
-        yield record_score(sum(history))
+        record_score(sum(history))
         return history
     
     engine = ExecutionEngine()
@@ -215,8 +217,8 @@ async def validate_scoring():
     """Verify beam search keeps highest-scoring paths."""
     @compile
     def scoring_agent():
-        choice = yield branchpoint("pick_score")
-        yield record_score(choice)
+        choice = branchpoint("pick_score")
+        record_score(choice)
         return choice
     
     async def number_sampler(node, metadata=None):
@@ -224,7 +226,9 @@ async def validate_scoring():
         return list(range(1, 11))
     
     engine = ExecutionEngine()
+    store = FileSystemStore("validation_trace_scoring")
     strategy = BeamSearch(
+        store=store,
         engine=engine,
         sampler=number_sampler,
         width=3  # Keep only top 3

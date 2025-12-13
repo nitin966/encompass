@@ -31,9 +31,9 @@ async def run_tests(code: str) -> bool:
 # File 1: utils.py
 # Func 1: add
 def add_translator():
-    style = yield branchpoint("style_choice_add", options=["concise", "verbose"])
-    new_code = yield effect(translate_function, "def add(a, b): pass", style)
-    yield record_score(1.0)
+    style = branchpoint("style_choice_add", options=["concise", "verbose"])
+    new_code = effect(translate_function, "def add(a, b): pass", style)
+    record_score(1.0)
     return new_code
 
 AddTranslator = compile_agent(add_translator)
@@ -41,9 +41,9 @@ async def add_sampler(node, metadata=None): return ["concise", "verbose"]
 
 # Func 2: sub
 def sub_translator():
-    style = yield branchpoint("style_choice_sub", options=["concise", "verbose"])
-    new_code = yield effect(translate_function, "def sub(a, b): pass", style)
-    yield record_score(1.0)
+    style = branchpoint("style_choice_sub", options=["concise", "verbose"])
+    new_code = effect(translate_function, "def sub(a, b): pass", style)
+    record_score(1.0)
     return new_code
     
 SubTranslator = compile_agent(sub_translator)

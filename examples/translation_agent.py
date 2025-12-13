@@ -6,10 +6,10 @@ from encompass import compile, branchpoint, record_score, effect
 @compile
 def translation_agent(llm):
     # Depth 0: Signature Style
-    sig_style = yield branchpoint(name="signature_style")
+    sig_style = branchpoint(name="signature_style")
     
     # Depth 1: Body Style
-    body_style = yield branchpoint(name="body_style")
+    body_style = branchpoint(name="body_style")
     
     # Mock logic to determine score and result
     score = 0.0
@@ -29,7 +29,7 @@ def translation_agent(llm):
         result += "    return a + b;\n}" # Same body for now
         score += 10.0
         
-    yield record_score(score)
+    record_score(score)
     return result
 
 def create_translation_agent(llm):

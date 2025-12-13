@@ -18,9 +18,9 @@ from core.signals import branchpoint, record_score
 def agent_d5():
     total = 0
     for i in range(5):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 
@@ -28,9 +28,9 @@ def agent_d5():
 def agent_d15():
     total = 0
     for i in range(15):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 

@@ -58,12 +58,12 @@ async def demonstrate_search():
     @compile
     def demo_agent():
         """Agent with clear branching."""
-        step1 = yield branchpoint("first_decision")
-        step2 = yield branchpoint("second_decision")
+        step1 = branchpoint("first_decision")
+        step2 = branchpoint("second_decision")
         
         # Score formula to show different paths have different scores
         score = step1 * 10 + step2
-        yield record_score(score)
+        record_score(score)
         
         return f"{step1}-{step2}"
     

@@ -28,9 +28,9 @@ def agent_depth_10():
     """Agent with exactly 10 branchpoints."""
     total = 0
     for i in range(10):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 
@@ -39,9 +39,9 @@ def agent_depth_30():
     """Agent with exactly 30 branchpoints."""
     total = 0
     for i in range(30):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 
@@ -50,9 +50,9 @@ def agent_depth_50():
     """Agent with exactly 50 branchpoints."""
     total = 0
     for i in range(50):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 
@@ -61,9 +61,9 @@ def agent_depth_100():
     """Agent with exactly 100 branchpoints."""
     total = 0
     for i in range(100):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 

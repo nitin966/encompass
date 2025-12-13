@@ -84,7 +84,7 @@ class DeepSearchBenchmark:
             
             for step in range(self.depth):
                 # Choose direction
-                direction = yield branchpoint(f"step_{step}")
+                direction = branchpoint(f"step_{step}")
                 
                 # Update position based on direction
                 if direction == "right":
@@ -103,7 +103,7 @@ class DeepSearchBenchmark:
             distance = abs(goal_x - x) + abs(goal_y - y)
             score = -distance  # Negative distance (closer is better)
             
-            yield record_score(score)
+            record_score(score)
             return f"Final: ({x}, {y}), Distance: {distance}"
         
         # Sampler that provides sensible options
@@ -184,10 +184,10 @@ class DeepSearchBenchmark:
             total = 0
             
             for i in range(self.depth):
-                choice = yield branchpoint(f"decision_{i}")
+                choice = branchpoint(f"decision_{i}")
                 total += choice
             
-            yield record_score(total)
+            record_score(total)
             return total
         
         async def number_sampler(node, metadata=None):

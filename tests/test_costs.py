@@ -17,13 +17,13 @@ class TestCostTracking(unittest.IsolatedAsyncioTestCase):
         @compile
         def agent():
             # Yield a cost record
-            yield record_costs(tokens=100, dollars=0.01)
+            record_costs(tokens=100, dollars=0.01)
             
             # Yield a branchpoint
-            x = yield branchpoint("choice")
+            x = branchpoint("choice")
             
             # Another cost
-            yield record_costs(tokens=50, dollars=0.005)
+            record_costs(tokens=50, dollars=0.005)
             
             return x
         

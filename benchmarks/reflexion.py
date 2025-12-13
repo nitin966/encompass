@@ -29,25 +29,25 @@ def run_tests(code_str):
 @compile
 def reflexion_agent():
     # Attempt 1
-    code = yield branchpoint("generate_code", metadata={"attempt": 1})
-    score = yield run_tests(code)
+    code = branchpoint("generate_code", metadata={"attempt": 1})
+    score = run_tests(code)
     
     if score == 1.0:
-        yield record_score(100)
-        yield early_stop()
+        record_score(100)
+        early_stop()
         return "Solved"
         
     # Attempt 2 (Reflexion)
-    reflection = yield branchpoint("reflect", metadata={"prev_score": score})
-    code_v2 = yield branchpoint("generate_code_v2", metadata={"reflection": reflection})
-    score_v2 = yield run_tests(code_v2)
+    reflection = branchpoint("reflect", metadata={"prev_score": score})
+    code_v2 = branchpoint("generate_code_v2", metadata={"reflection": reflection})
+    score_v2 = run_tests(code_v2)
     
     if score_v2 == 1.0:
-        yield record_score(100)
-        yield early_stop()
+        record_score(100)
+        early_stop()
         return "Solved"
         
-    yield record_score(score_v2 * 100)
+    record_score(score_v2 * 100)
     return "Failed"
 
 async def reflexion_sampler(node, metadata=None):

@@ -7,7 +7,7 @@ from search.strategies import BeamSearch
 
 # Define agents at module level to ensure visibility for compiled code
 def sub_agent():
-    x = yield branchpoint("sub_choice")
+    x = branchpoint("sub_choice")
     return x * 2
 
 SubAgentClass = compile_agent(sub_agent)
@@ -17,7 +17,7 @@ async def dummy_sampler(node, metadata=None):
 
 def main_agent_compiled():
      # Use SubAgentClass which is now global
-     result = yield local_search(BeamSearch, SubAgentClass, sampler=dummy_sampler, width=2)
+     result = local_search(BeamSearch, SubAgentClass, sampler=dummy_sampler, width=2)
      return result
 
 AgentClass = compile_agent(main_agent_compiled)

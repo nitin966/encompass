@@ -11,12 +11,12 @@ from storage.filesystem import FileSystemStore
 def simple_agent():
     # A simple agent for testing
     # Depth 0: 0 or 1
-    choice = yield branchpoint("choice")
+    choice = branchpoint("choice")
     if choice == 1:
-        yield record_score(10.0)
+        record_score(10.0)
         return "Win"
     else:
-        yield record_score(0.0)
+        record_score(0.0)
         return "Lose"
 
 async def simple_sampler(node):
@@ -82,11 +82,11 @@ class TestEncompassCore(unittest.IsolatedAsyncioTestCase):
             # Go deep: 20 steps
             # Always pick 1 to survive
             for i in range(20):
-                choice = yield branchpoint(f"step_{i}")
+                choice = branchpoint(f"step_{i}")
                 if choice != 1:
-                    yield record_score(-1.0)
+                    record_score(-1.0)
                     return "Dead"
-                yield record_score(1.0)
+                record_score(1.0)
             return "Alive"
 
         async def deep_sampler(node, metadata=None):
@@ -114,20 +114,20 @@ class TestEncompassCore(unittest.IsolatedAsyncioTestCase):
         
         @encompass_agent
         def noisy_agent():
-            choice = yield branchpoint("root")
+            choice = branchpoint("root")
             
             if choice == "A":
                 # Simulate noise via a second hidden branchpoint or just stochastic score?
                 # Since our engine is deterministic replay, we must use an input to represent the "noise outcome".
                 # Let's say the environment (sampler) determines the outcome.
-                outcome = yield branchpoint("chance_node")
+                outcome = branchpoint("chance_node")
                 if outcome == "win":
-                    yield record_score(100.0)
+                    record_score(100.0)
                 else:
-                    yield record_score(0.0)
+                    record_score(0.0)
             else:
                 # Branch B
-                yield record_score(10.0)
+                record_score(10.0)
             return "Done"
 
         async def noisy_sampler(node, metadata=None):

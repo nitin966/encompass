@@ -28,10 +28,10 @@ def create_counter_agent(target_depth):
         """Count up through target_depth decisions."""
         total = 0
         for i in range(target_depth):  # Uses closure variable
-            choice = yield branchpoint(f"step_{i}")
+            choice = branchpoint(f"step_{i}")
             total += choice
         
-        yield record_score(total)
+        record_score(total)
         return total
     
     return counter_agent

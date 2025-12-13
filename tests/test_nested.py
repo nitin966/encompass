@@ -4,12 +4,12 @@ from encompass import compile, branchpoint
 
 @compile
 def sub_agent():
-    choice = yield branchpoint("sub_choice")
+    choice = branchpoint("sub_choice")
     return choice * 2
     
 @compile
 def main_agent():
-    val = yield sub_agent()
+    val = sub_agent()
     return val + 1
 
 class TestNestedSearch(unittest.IsolatedAsyncioTestCase):

@@ -29,9 +29,9 @@ for test_depth in [5, 10, 15, 20, 25, 30]:
 def test_agent():
     total = 0
     for i in range({test_depth}):
-        choice = yield branchpoint(f"step_{{i}}")
+        choice = branchpoint(f"step_{{i}}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 """
     

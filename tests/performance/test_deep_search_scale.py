@@ -22,36 +22,36 @@ def anyio_backend():
 def agent_depth_10():
     total = 0
     for i in range(10):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 @compile
 def agent_depth_30():
     total = 0
     for i in range(30):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 @compile
 def agent_depth_50():
     total = 0
     for i in range(50):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 @compile
 def agent_depth_100():
     total = 0
     for i in range(100):
-        choice = yield branchpoint(f"step_{i}")
+        choice = branchpoint(f"step_{i}")
         total += choice
-    yield record_score(total)
+    record_score(total)
     return total
 
 @pytest.mark.anyio

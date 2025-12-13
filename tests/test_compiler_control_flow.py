@@ -6,7 +6,7 @@ from encompass import branchpoint
 class TestCompilerControlFlow(unittest.IsolatedAsyncioTestCase):
     async def test_if_statement(self):
         def agent():
-            x = yield branchpoint("choice", options=[1, 2])
+            x = branchpoint("choice", options=[1, 2])
             if x == 1:
                 y = "one"
             else:
@@ -33,7 +33,7 @@ class TestCompilerControlFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_argument_capture(self):
         def agent(start_val):
-            x = yield branchpoint("choice", options=[1])
+            x = branchpoint("choice", options=[1])
             return start_val + x
             
         AgentClass = compile_agent(agent)

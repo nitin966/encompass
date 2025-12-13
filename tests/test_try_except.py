@@ -6,7 +6,7 @@ from runtime.engine import ExecutionEngine
 @compile
 def agent_with_try():
     try:
-        x = yield branchpoint("choice")
+        x = branchpoint("choice")
         if x == 1:
             raise ValueError("Boom")
         return x
@@ -19,7 +19,7 @@ def agent_with_try():
 def agent_nested_try():
     try:
         try:
-            x = yield branchpoint("inner")
+            x = branchpoint("inner")
             if x == 1:
                 raise ValueError("Inner Boom")
         except ValueError:
