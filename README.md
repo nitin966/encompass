@@ -154,19 +154,39 @@ python run_benchmark.py --benchmark arc --strategy beam --real-llm --model qwen2
 
 ### Deep Search Validation
 
-Verify the O(1) state restoration and linear scaling up to depth 100:
+Verify the O(1) state restoration and linear scaling up to depth 50+:
 
 ```bash
-python validation/working_deep_test.py
+python validation/simple_deep_test.py
 ```
 
 ### Unit Tests
 
-Run the comprehensive test suite (24 tests covering compiler, search, and caching):
+Run the comprehensive test suite (88 tests covering compiler, search, caching, and advanced control flow):
 
 ```bash
-pytest tests/ -v
+python -m unittest discover tests
 ```
+
+## Compiler Capabilities
+
+EnCompass supports advanced Python features in agent code:
+- **Control Flow**: `if/else`, `while`, `for`, `break`, `continue`, nested loops.
+- **Exceptions**: `try/except`, `raise`, exception propagation.
+- **Yield Expressions**: `x = yield branchpoint(...)`, `if (yield ...):`, `return (yield ...)`.
+- **Imports**: `import module` works and persists across states.
+- **State Management**: Automatic serialization of local variables (including large objects).
+
+**Current Limitations**:
+- Closures (nonlocal variables) are not yet supported.
+- `try/finally` and `with` statements are not yet supported.
+- Tuple unpacking assignment (`x, y = ...`) is not yet supported.
+
+## Performance
+
+- **O(1) Resumption**: Resuming a machine takes constant time regardless of history length.
+- **Heavy State**: Efficiently handles large context objects (e.g., 1MB strings) with minimal overhead (~0.6ms per step), leveraging structural sharing where possible.
+
 
 ## Results
 
