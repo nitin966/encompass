@@ -34,6 +34,7 @@ import textwrap
 from collections.abc import Callable
 
 import dill
+from pyrsistent import pmap
 
 from core.signals import ControlSignal
 
@@ -50,7 +51,7 @@ class AgentMachine(ControlSignal):
 
     def __init__(self):
         self._state = 0  # Current state number (which yield point)
-        self._ctx = {}  # Local variables dictionary
+        self._ctx = pmap()  # Local variables (Immutable Persistent Map)
         self._done = False  # Whether execution completed
         self._result = None  # Final return value
         self._stack = []  # Call stack for nested agents
@@ -81,20 +82,47 @@ class AgentMachine(ControlSignal):
         """
         return dill.dumps(self)
 
+    def snapshot(self):
+        """
+        Create a fast in-memory snapshot of the machine state.
+        
+        Returns:
+            AgentMachine: A copy of the machine with shared immutable context.
+        """
+        import copy
+        # Shallow copy the machine itself
+        snap = copy.copy(self)
+        # Since _ctx is immutable (pmap), we can safely share it!
+        # Any update will create a new pmap, leaving this one untouched.
+        snap._ctx = self._ctx
+        snap._stack = self._stack[:]
+        return snap
+
     def load(self, state):
         """
-        Restore machine state from bytes.
+        Restore machine state.
 
         Args:
-            state: bytes or dict (legacy) to restore from
+            state: bytes, dict (legacy), or AgentMachine instance to restore from
         """
         if isinstance(state, bytes):
             loaded = dill.loads(state)
             self.__dict__.update(loaded.__dict__)
+        elif isinstance(state, AgentMachine):
+            # When loading from a snapshot (which is already a valid machine state),
+            # we want to adopt its state.
+            
+            # 1. Copy scalar fields (state, done, result, etc.)
+            self.__dict__.update(state.__dict__)
+            
+            # 2. Context is immutable, so we can just point to it.
+            # Future updates will replace self._ctx with a new pmap.
+            self._ctx = state._ctx
+            self._stack = state._stack[:]
         else:
             # Legacy dict support
             self._state = state["_state"]
-            self._ctx = state["_ctx"]
+            self._ctx = pmap(state["_ctx"]) # Convert dict to pmap
             self._done = state["_done"]
             self._result = state["_result"]
             self._stack = state.get("_stack", [])
@@ -151,17 +179,28 @@ class CPSCompiler(ast.NodeTransformer):
                         h_body.append(
                             ast.Assign(
                                 targets=[
-                                    ast.Subscript(
+                                    ast.Attribute(
+                                        value=ast.Name(id="self", ctx=ast.Load()),
+                                        attr="_ctx",
+                                        ctx=ast.Store(),
+                                    )
+                                ],
+                                value=ast.Call(
+                                    func=ast.Attribute(
                                         value=ast.Attribute(
                                             value=ast.Name(id="self", ctx=ast.Load()),
                                             attr="_ctx",
                                             ctx=ast.Load(),
                                         ),
-                                        slice=ast.Constant(value=orig_handler.name),
-                                        ctx=ast.Store(),
-                                    )
-                                ],
-                                value=ast.Name(id=orig_handler.name, ctx=ast.Load()),
+                                        attr="set",
+                                        ctx=ast.Load(),
+                                    ),
+                                    args=[
+                                        ast.Constant(value=orig_handler.name),
+                                        ast.Name(id=orig_handler.name, ctx=ast.Load())
+                                    ],
+                                    keywords=[],
+                                )
                             )
                         )
 
@@ -210,47 +249,49 @@ class CPSCompiler(ast.NodeTransformer):
         self.current_stmts = []
 
     def visit_Assign(self, node):
-        # Rewrite assignments to use self._ctx
-        # x = ... -> self._ctx['x'] = ...
-        targets = []
+        # Rewrite assignments to use self._ctx.set()
+        # x = ... -> self._ctx = self._ctx.set('x', ...)
+        
+        # Evaluate value (handles yields recursively)
+        value = self.visit(node.value)
+        
+        # Use a temp variable to hold the value (handles multiple targets safely)
+        temp_name = f"_assign_tmp_{self.current_state}_{len(self.current_stmts)}"
+        self.current_stmts.append(
+            ast.Assign(targets=[ast.Name(id=temp_name, ctx=ast.Store())], value=value)
+        )
+        temp_node = ast.Name(id=temp_name, ctx=ast.Load())
+        
         for t in node.targets:
             if isinstance(t, ast.Name) and t.id in self.varnames:
-                targets.append(
-                    ast.Subscript(
-                        value=ast.Attribute(
-                            value=ast.Name(id="self", ctx=ast.Load()), attr="_ctx", ctx=ast.Load()
-                        ),
-                        slice=ast.Constant(value=t.id),
-                        ctx=ast.Store(),
+                # self._ctx = self._ctx.set('x', temp)
+                self.current_stmts.append(
+                    ast.Assign(
+                        targets=[
+                            ast.Attribute(
+                                value=ast.Name(id="self", ctx=ast.Load()),
+                                attr="_ctx",
+                                ctx=ast.Store()
+                            )
+                        ],
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Attribute(
+                                    value=ast.Name(id="self", ctx=ast.Load()),
+                                    attr="_ctx",
+                                    ctx=ast.Load()
+                                ),
+                                attr="set",
+                                ctx=ast.Load()
+                            ),
+                            args=[ast.Constant(value=t.id), temp_node],
+                            keywords=[]
+                        )
                     )
                 )
             else:
-                targets.append(t)
-
-        # Check yield
-        if isinstance(node.value, ast.Yield):
-            # x = yield foo
-            # 1. return foo
-            # 2. next state: self._ctx['x'] = _input
-
-            # Emit return yield_val
-            # We must visit the yield value to rewrite variables!
-            yield_val = self.visit(node.value.value) if node.value.value else None
-            self.current_stmts.append(ast.Return(value=yield_val))
-
-            next_state = self.current_state + 1
-            self._flush_state(next_state)
-
-            # In next state, assign input
-            # self._ctx['x'] = _input
-            assign = ast.Assign(targets=targets, value=ast.Name(id="_input", ctx=ast.Load()))
-            self.current_stmts.append(assign)
-        else:
-            # Normal assignment
-            # self._ctx['x'] = value
-            # We need to recursively visit value to rewrite variable reads too!
-            value = self.visit(node.value)
-            self.current_stmts.append(ast.Assign(targets=targets, value=value))
+                # Normal assignment: t = temp
+                self.current_stmts.append(ast.Assign(targets=[t], value=temp_node))
 
     def visit_Global(self, node):
         # Preserve global declarations
@@ -262,23 +303,82 @@ class CPSCompiler(ast.NodeTransformer):
 
     def visit_AugAssign(self, node):
         # Handle augmented assignments like x += 1
-        # If x is a local variable (in varnames), rewrite to self._ctx['x'] += ...
+        # If x is a local variable (in varnames), rewrite to self._ctx = self._ctx.set('x', self._ctx['x'] + value)
         # Otherwise, keep as is (for globals)
+        
+        # Evaluate value (handles yields recursively)
+        value = self.visit(node.value)
+
         if isinstance(node.target, ast.Name) and node.target.id in self.varnames:
-            # Rewrite to self._ctx['x'] += value
-            target = ast.Subscript(
+            # Rewrite to self._ctx = self._ctx.set('x', self._ctx['x'] op value)
+            
+            # 1. Read current value: self._ctx['x']
+            current_val = ast.Subscript(
                 value=ast.Attribute(
                     value=ast.Name(id="self", ctx=ast.Load()), attr="_ctx", ctx=ast.Load()
                 ),
                 slice=ast.Constant(value=node.target.id),
-                ctx=ast.Store(),
+                ctx=ast.Load(),
             )
-            value = self.visit(node.value)
-            self.current_stmts.append(ast.AugAssign(target=target, op=node.op, value=value))
+            
+            # 2. Compute new value: current op value
+            new_val = ast.BinOp(left=current_val, op=node.op, right=value)
+            
+            # 3. Update context: self._ctx = self._ctx.set('x', new_val)
+            self.current_stmts.append(
+                ast.Assign(
+                    targets=[
+                        ast.Attribute(
+                            value=ast.Name(id="self", ctx=ast.Load()),
+                            attr="_ctx",
+                            ctx=ast.Store()
+                        )
+                    ],
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Attribute(
+                                value=ast.Name(id="self", ctx=ast.Load()),
+                                attr="_ctx",
+                                ctx=ast.Load()
+                            ),
+                            attr="set",
+                            ctx=ast.Load()
+                        ),
+                        args=[ast.Constant(value=node.target.id), new_val],
+                        keywords=[]
+                    )
+                )
+            )
         else:
             # Keep as is (for globals or attributes)
-            value = self.visit(node.value)
             self.current_stmts.append(ast.AugAssign(target=node.target, op=node.op, value=value))
+
+    def visit_Yield(self, node):
+        # Handle yield expression
+        # 1. Evaluate value to yield
+        yield_val = self.visit(node.value) if node.value else ast.Constant(value=None)
+        
+        # 2. Set next state
+        next_state = self.current_state + 1
+        self.current_stmts.append(
+            ast.Assign(
+                targets=[
+                    ast.Attribute(
+                        value=ast.Name(id="self", ctx=ast.Load()), attr="_state", ctx=ast.Store()
+                    )
+                ],
+                value=ast.Constant(value=next_state),
+            )
+        )
+        
+        # 3. Return yielded value
+        self.current_stmts.append(ast.Return(value=yield_val))
+        
+        # 4. Flush state (start next block)
+        self._flush_state(next_state)
+        
+        # 5. Return expression for received value (_input)
+        return ast.Name(id="_input", ctx=ast.Load())
 
     def visit_Call(self, node):
         # Implicit Yield Logic
@@ -346,20 +446,31 @@ class CPSCompiler(ast.NodeTransformer):
             orelse=[
                 # Not a signal.
                 # Save temp to _ctx so next state can retrieve it (simulating continuation)
-                # self._ctx['_saved_temp'] = temp
+                # self._ctx = self._ctx.set('_saved_temp', temp)
                 ast.Assign(
                     targets=[
-                        ast.Subscript(
+                        ast.Attribute(
+                            value=ast.Name(id="self", ctx=ast.Load()),
+                            attr="_ctx",
+                            ctx=ast.Store(),
+                        )
+                    ],
+                    value=ast.Call(
+                        func=ast.Attribute(
                             value=ast.Attribute(
                                 value=ast.Name(id="self", ctx=ast.Load()),
                                 attr="_ctx",
                                 ctx=ast.Load(),
                             ),
-                            slice=ast.Constant(value=f"_saved_{temp_name}"),
-                            ctx=ast.Store(),
-                        )
-                    ],
-                    value=ast.Name(id=temp_name, ctx=ast.Load()),
+                            attr="set",
+                            ctx=ast.Load(),
+                        ),
+                        args=[
+                            ast.Constant(value=f"_saved_{temp_name}"),
+                            ast.Name(id=temp_name, ctx=ast.Load())
+                        ],
+                        keywords=[],
+                    )
                 ),
                 # self._state = next_state
                 ast.Assign(
@@ -403,6 +514,24 @@ class CPSCompiler(ast.NodeTransformer):
             body=[
                 ast.Assign(
                     targets=[ast.Name(id=val_name, ctx=ast.Store())],
+                    value=ast.Subscript(
+                        value=ast.Attribute(
+                            value=ast.Name(id="self", ctx=ast.Load()),
+                            attr="_ctx",
+                            ctx=ast.Load(),
+                        ),
+                        slice=ast.Constant(value=saved_key),
+                        ctx=ast.Load(),
+                    )
+                ),
+                ast.Assign(
+                    targets=[
+                        ast.Attribute(
+                            value=ast.Name(id="self", ctx=ast.Load()),
+                            attr="_ctx",
+                            ctx=ast.Store(),
+                        )
+                    ],
                     value=ast.Call(
                         func=ast.Attribute(
                             value=ast.Attribute(
@@ -410,12 +539,12 @@ class CPSCompiler(ast.NodeTransformer):
                                 attr="_ctx",
                                 ctx=ast.Load(),
                             ),
-                            attr="pop",
+                            attr="discard",
                             ctx=ast.Load(),
                         ),
                         args=[ast.Constant(value=saved_key)],
                         keywords=[],
-                    ),
+                    )
                 )
             ],
             orelse=[
@@ -438,7 +567,11 @@ class CPSCompiler(ast.NodeTransformer):
             next_state = self.current_state + 1
             self._flush_state(next_state)
         else:
-            self.current_stmts.append(self.generic_visit(node))
+            res = self.generic_visit(node)
+            if res is None:
+                print(f"WARNING: generic_visit returned None for {node} with value {node.value}")
+            else:
+                self.current_stmts.append(res)
 
     def visit_If(self, node):
         # 1. Visit test
@@ -626,6 +759,9 @@ class CPSCompiler(ast.NodeTransformer):
         # that jumps to the handler placeholders.
         for stmt in node.body:
             self.visit(stmt)
+
+        # Flush body state while stack is still active to ensure wrapping
+        self._flush_state(None)
 
         # 4. Pop context
         self.try_stack.pop()
@@ -852,6 +988,8 @@ class CPSCompiler(ast.NodeTransformer):
                 if not stmts:
                     continue
                 for stmt in stmts:
+                    if stmt is None:
+                        continue
                     for node in ast.walk(stmt):
                         if isinstance(node, ast.Assign) and len(node.targets) == 1:
                             t = node.targets[0]
@@ -867,20 +1005,35 @@ class CPSCompiler(ast.NodeTransformer):
         iter_expr = self.visit(node.iter)
 
         # self._ctx[iter_name] = iter(expr)
+        # self._ctx[iter_name] = iter(expr)
+        # self._ctx = self._ctx.set(iter_name, iter(expr))
         self.current_stmts.append(
             ast.Assign(
                 targets=[
-                    ast.Subscript(
-                        value=ast.Attribute(
-                            value=ast.Name(id="self", ctx=ast.Load()), attr="_ctx", ctx=ast.Load()
-                        ),
-                        slice=ast.Constant(value=iter_name),
+                    ast.Attribute(
+                        value=ast.Name(id="self", ctx=ast.Load()),
+                        attr="_ctx",
                         ctx=ast.Store(),
                     )
                 ],
                 value=ast.Call(
-                    func=ast.Name(id="iter", ctx=ast.Load()), args=[iter_expr], keywords=[]
-                ),
+                    func=ast.Attribute(
+                        value=ast.Attribute(
+                            value=ast.Name(id="self", ctx=ast.Load()),
+                            attr="_ctx",
+                            ctx=ast.Load(),
+                        ),
+                        attr="set",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Constant(value=iter_name),
+                        ast.Call(
+                            func=ast.Name(id="iter", ctx=ast.Load()), args=[iter_expr], keywords=[]
+                        )
+                    ],
+                    keywords=[],
+                )
             )
         )
 
@@ -1062,6 +1215,8 @@ class CPSCompiler(ast.NodeTransformer):
                 if not stmts:
                     continue
                 for stmt in stmts:
+                    if stmt is None:
+                        continue
                     for node in ast.walk(stmt):
                         if isinstance(node, ast.Assign) and len(node.targets) == 1:
                             t = node.targets[0]
@@ -1143,15 +1298,28 @@ class CPSCompiler(ast.NodeTransformer):
         if node.name in self.varnames:
             assign = ast.Assign(
                 targets=[
-                    ast.Subscript(
-                        value=ast.Attribute(
-                            value=ast.Name(id="self", ctx=ast.Load()), attr="_ctx", ctx=ast.Load()
-                        ),
-                        slice=ast.Constant(value=node.name),
+                    ast.Attribute(
+                        value=ast.Name(id="self", ctx=ast.Load()),
+                        attr="_ctx",
                         ctx=ast.Store(),
                     )
                 ],
-                value=ast.Name(id=node.name, ctx=ast.Load()),
+                value=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Attribute(
+                            value=ast.Name(id="self", ctx=ast.Load()),
+                            attr="_ctx",
+                            ctx=ast.Load(),
+                        ),
+                        attr="set",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Constant(value=node.name),
+                        ast.Name(id=node.name, ctx=ast.Load())
+                    ],
+                    keywords=[],
+                )
             )
             self.current_stmts.append(assign)
 
@@ -1162,46 +1330,137 @@ class CPSCompiler(ast.NodeTransformer):
         if node.name in self.varnames:
             assign = ast.Assign(
                 targets=[
-                    ast.Subscript(
-                        value=ast.Attribute(
-                            value=ast.Name(id="self", ctx=ast.Load()), attr="_ctx", ctx=ast.Load()
-                        ),
-                        slice=ast.Constant(value=node.name),
+                    ast.Attribute(
+                        value=ast.Name(id="self", ctx=ast.Load()),
+                        attr="_ctx",
                         ctx=ast.Store(),
                     )
                 ],
-                value=ast.Name(id=node.name, ctx=ast.Load()),
+                value=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Attribute(
+                            value=ast.Name(id="self", ctx=ast.Load()),
+                            attr="_ctx",
+                            ctx=ast.Load(),
+                        ),
+                        attr="set",
+                        ctx=ast.Load(),
+                    ),
+                    args=[
+                        ast.Constant(value=node.name),
+                        ast.Name(id=node.name, ctx=ast.Load())
+                    ],
+                    keywords=[],
+                )
             )
             self.current_stmts.append(assign)
 
     def visit_Return(self, node):
-        # self._result = value
-        # self._done = True
-        # return
-        if node.value:
-            self.current_stmts.append(
-                ast.Assign(
-                    targets=[
-                        ast.Attribute(
-                            value=ast.Name(id="self", ctx=ast.Load()),
-                            attr="_result",
-                            ctx=ast.Store(),
-                        )
-                    ],
-                    value=self.visit(node.value),
-                )
-            )
+        # Handle return statement
+        # 1. Evaluate value
+        value = self.visit(node.value) if node.value else ast.Constant(value=None)
+        
+        # 2. Set _result = value
         self.current_stmts.append(
             ast.Assign(
                 targets=[
                     ast.Attribute(
-                        value=ast.Name(id="self", ctx=ast.Load()), attr="_done", ctx=ast.Store()
+                        value=ast.Name(id="self", ctx=ast.Load()),
+                        attr="_result",
+                        ctx=ast.Store(),
+                    )
+                ],
+                value=value,
+            )
+        )
+        
+        # 3. Set _done = True
+        self.current_stmts.append(
+            ast.Assign(
+                targets=[
+                    ast.Attribute(
+                        value=ast.Name(id="self", ctx=ast.Load()),
+                        attr="_done",
+                        ctx=ast.Store(),
                     )
                 ],
                 value=ast.Constant(value=True),
             )
         )
-        self.current_stmts.append(ast.Return(value=None))
+        
+        # 4. Return value (so run() returns it too)
+        # We need to return the value so the caller gets it immediately.
+        # But we also set _result for inspection.
+        self.current_stmts.append(ast.Return(value=value))
+
+    def visit_Import(self, node):
+        # Handle import statement
+        # import math -> self._ctx = self._ctx.set('math', __import__('math'))
+        # But import is complex.
+        # Simplest way: execute import (assigns to locals), then copy to _ctx.
+        
+        # 1. Emit original import
+        self.current_stmts.append(node)
+        
+        # 2. Copy imported names to _ctx
+        for alias in node.names:
+            name = alias.asname or alias.name.split('.')[0] # Top level name
+            if name in self.varnames:
+                self.current_stmts.append(
+                    ast.Assign(
+                        targets=[
+                            ast.Attribute(
+                                value=ast.Name(id="self", ctx=ast.Load()),
+                                attr="_ctx",
+                                ctx=ast.Store()
+                            )
+                        ],
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Attribute(
+                                    value=ast.Name(id="self", ctx=ast.Load()),
+                                    attr="_ctx",
+                                    ctx=ast.Load()
+                                ),
+                                attr="set",
+                                ctx=ast.Load()
+                            ),
+                            args=[ast.Constant(value=name), ast.Name(id=name, ctx=ast.Load())],
+                            keywords=[]
+                        )
+                    )
+                )
+
+    def visit_ImportFrom(self, node):
+        # Handle from ... import ...
+        self.current_stmts.append(node)
+        for alias in node.names:
+            name = alias.asname or alias.name
+            if name in self.varnames:
+                self.current_stmts.append(
+                    ast.Assign(
+                        targets=[
+                            ast.Attribute(
+                                value=ast.Name(id="self", ctx=ast.Load()),
+                                attr="_ctx",
+                                ctx=ast.Store()
+                            )
+                        ],
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Attribute(
+                                    value=ast.Name(id="self", ctx=ast.Load()),
+                                    attr="_ctx",
+                                    ctx=ast.Load()
+                                ),
+                                attr="set",
+                                ctx=ast.Load()
+                            ),
+                            args=[ast.Constant(value=name), ast.Name(id=name, ctx=ast.Load())],
+                            keywords=[]
+                        )
+                    )
+                )
 
     def visit_Raise(self, node):
         new_exc = self.visit(node.exc) if node.exc else None
@@ -1217,11 +1476,18 @@ def compile_agent(func: Callable) -> type[AgentMachine]:
     tree = ast.parse(source)
     func_def = tree.body[0]
 
+    if isinstance(func_def, ast.AsyncFunctionDef):
+        raise TypeError("Async functions are not supported. Use a standard generator function.")
+
     compiler = CPSCompiler(func.__code__.co_varnames)
 
     # Process body
     for stmt in func_def.body:
         compiler.visit(stmt)
+        
+    # Implicit return None at the end
+    compiler.visit(ast.Return(value=None))
+
     compiler._flush_state(None)  # Flush last block
 
     # Generate run method
@@ -1233,6 +1499,12 @@ def compile_agent(func: Callable) -> type[AgentMachine]:
     for state_id, stmts in compiler.states.items():
         if not stmts:
             continue
+        # Filter None
+        if any(s is None for s in stmts):
+            print(f"DEBUG: Found None in state {state_id}: {stmts}")
+        stmts = [s for s in stmts if s is not None]
+        compiler.states[state_id] = stmts
+        
         cases.append(
             ast.If(
                 test=ast.Compare(
@@ -1287,6 +1559,7 @@ def compile_agent(func: Callable) -> type[AgentMachine]:
     )
 
     init_body = [
+        ast.ImportFrom(module="pyrsistent", names=[ast.alias(name="pmap", asname=None)], level=0),
         ast.Assign(
             targets=[
                 ast.Attribute(
@@ -1301,7 +1574,11 @@ def compile_agent(func: Callable) -> type[AgentMachine]:
                     value=ast.Name(id="self", ctx=ast.Load()), attr="_ctx", ctx=ast.Store()
                 )
             ],
-            value=ctx_dict,
+            value=ast.Call(
+                func=ast.Name(id="pmap", ctx=ast.Load()),
+                args=[ctx_dict],
+                keywords=[],
+            ),
         ),
         ast.Assign(
             targets=[
@@ -1495,7 +1772,7 @@ def compile_agent(func: Callable) -> type[AgentMachine]:
 
     # Execute in the function's globals to support shared state
     # We use a separate locals dict to capture the generated class without polluting globals
-    exec_locals = {"AgentMachine": AgentMachine}
+    exec_locals = {"AgentMachine": AgentMachine, "pmap": pmap}
 
     exec(compile(module_ast, filename="<string>", mode="exec"), func.__globals__, exec_locals)
     return exec_locals[class_name]

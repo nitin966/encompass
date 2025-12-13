@@ -23,7 +23,7 @@ class TestImplicitYield(unittest.TestCase):
         self.assertFalse(machine._done, "Machine should not be done after implicit yield")
 
         res = machine.run(10)
-        self.assertIsNone(res)
+        self.assertEqual(res, 10)
         self.assertTrue(machine._done)
         self.assertEqual(machine._result, 10)
 

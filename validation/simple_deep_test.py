@@ -24,17 +24,17 @@ def create_counter_agent(target_depth):
     """Create agent with specified depth using closure."""
 
     @compile
-    def counter_agent():
+    def counter_agent(depth):
         """Count up through target_depth decisions."""
         total = 0
-        for i in range(target_depth):  # Uses closure variable
+        for i in range(depth):
             choice = branchpoint(f"step_{i}")
             total += choice
 
         record_score(total)
         return total
 
-    return counter_agent
+    return lambda: counter_agent(target_depth)
 
 
 async def test_deep_search(depth, width):

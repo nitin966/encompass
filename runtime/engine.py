@@ -148,7 +148,7 @@ class ExecutionEngine:
                 nonlocal current_score
                 sig = machine.run(val)
                 while True:
-                    if sig is None and machine._done:
+                    if machine._done:
                         return None  # Done
 
                     if isinstance(sig, ScoreSignal):
