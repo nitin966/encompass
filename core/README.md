@@ -2,7 +2,7 @@
 
 The `core/` directory implements the compilation toolchain and runtime environment for the EnCompass framework.
 
-This system addresses the fundamental limitation of standard Python generators in search-based AI: the inability to efficiently fork and serialize execution state. To enable algorithms such as Monte Carlo Tree Search (MCTS) or Beam Search over arbitrary code, the runtime effectively implements a userspace virtual machine that reifies the Python stack into explicit, persistent data structures.
+This system addresses the fundamental limitation of standard Python generators in search-based AI, ie. the inability to efficiently fork and serialize execution state. To enable algorithms such as Monte Carlo Tree Search (MCTS) or Beam Search over arbitrary code, the runtime effectively implements a userspace virtual machine that reifies the Python stack into explicit, persistent data structures.
 
 ## 1. System Architecture
 
@@ -62,7 +62,7 @@ A `loop_stack` tracks the `HEAD` and `AFTER` IDs to correctly resolve `break` an
 
 ### 2.4 Exception Handling Implementation
 
-The implementation of `visit_Try` is the most complex component of the compiler. Because a single Python `try` block may be fragmented into dozens of compiled states, the `try/except` context must be preserved across state boundaries.
+Because a single Python `try` block may be fragmented into dozens of compiled states, the `try/except` context must be preserved across state boundaries.
 
 **Mechanism:**
 1.  **Try Stack**: The compiler maintains a stack of active exception handlers.
