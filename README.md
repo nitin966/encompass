@@ -192,7 +192,7 @@ python run_benchmark.py --benchmark gsm8k_full --strategy beam --real-llm --mode
 python run_benchmark.py --benchmark gsm8k_full --strategy beam --real-llm --model qwen2.5:32b --width 8 --limit 100
 ```
 
-### Other Benchmarks (ARC, Reflexion)
+### Other Benchmarks (ARC, Reflexion, LiveCodeBench)
 
 ```bash
 # Reflexion (Code Generation + Self-Correction)
