@@ -10,7 +10,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/nitin966/encompass)](https://github.com/nitin966/encompass/issues)
 [![GitHub pull requests](https://img.shields.io/github/issues-pr/nitin966/encompass)](https://github.com/nitin966/encompass/pulls)
 
-EnCompass is a Python-to-CPS (Continuation-Passing Style) compiler. It's coded using Antigravity for about 95% of its code (here's the gentle disclaimer regarding "vibe coded" software) with Human-in-the-loop (myself).
+EnCompass is a Python-to-CPS (Continuation-Passing Style) compiler. Implemented with AI assistance (Antigravity); correctness enforced via tests, deterministic replays and benchmarks.
 
 It transforms standard Python generator functions into resumable state machines. This allows the program state (local variables, instruction pointer) to be serialized, cloned, and restored.
 
