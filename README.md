@@ -1,34 +1,36 @@
 
-# EnCompass
+# OpenEnCompass
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
-[![GitHub stars](https://img.shields.io/github/stars/nitin966/encompass)](https://github.com/nitin966/encompass/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/nitin966/encompass)](https://github.com/nitin966/encompass/network)
-[![GitHub contributors](https://img.shields.io/github/contributors/nitin966/encompass)](https://github.com/nitin966/encompass/graphs/contributors)
-[![GitHub issues](https://img.shields.io/github/issues/nitin966/encompass)](https://github.com/nitin966/encompass/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/nitin966/encompass)](https://github.com/nitin966/encompass/pulls)
+[![GitHub stars](https://img.shields.io/github/stars/nitin966/OpenEnCompass)](https://github.com/nitin966/OpenEnCompass/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/nitin966/OpenEnCompass)](https://github.com/nitin966/OpenEnCompass/network)
+[![GitHub contributors](https://img.shields.io/github/contributors/nitin966/OpenEnCompass)](https://github.com/nitin966/OpenEnCompass/graphs/contributors)
+[![GitHub issues](https://img.shields.io/github/issues/nitin966/OpenEnCompass)](https://github.com/nitin966/OpenEnCompass/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/nitin966/OpenEnCompass)](https://github.com/nitin966/OpenEnCompass/pulls)
 
-EnCompass is a Python-to-CPS (Continuation-Passing Style) compiler.
+OpenEnCompass is an implementation of Asari AI's Encompass paper, which is a Python-to-CPS (Continuation-Passing Style) compiler. 
 
 It transforms standard Python generator functions into resumable state machines. This allows the program state (local variables, instruction pointer) to be serialized, cloned, and restored.
 
 By treating the program execution as a tree of states, we can apply search algorithms (Beam Search, MCTS) to guide LLM agents, rather than relying on a single greedy sample.
 
+This work is implemented with AI assistance (Antigravity) and correctness enforced via tests, deterministic replays and benchmarks.
+
 **Status**: 73% accuracy on GSM8K (n=100) using `qwen2.5:32b` with Beam Search (width=8).
 
 ## Agent Complexity Comparison
 
-EnCompass significantly reduces the complexity of building sophisticated agents by abstracting away state management and search logic. The following table compares the lines of code (LOC) required for a manual state machine implementation vs. an EnCompass implementation across different patterns:
+OpenEnCompass significantly reduces the complexity of building sophisticated agents by abstracting away state management and search logic. The following table compares the lines of code (LOC) required for a manual state machine implementation vs. an OpenEnCompass implementation across different patterns:
 
-| Pattern | Base Agent (LOC) | EnCompass Agent (LOC) | **Reduction** |
+| Pattern | Base Agent (LOC) | OpenEnCompass Agent (LOC) | **Reduction** |
 | :--- | :--- | :--- | :--- |
 | **Code Translation** (Java → Python) | 493 | 250 | **49.3%** |
 | **Hypothesis Search** (ARC-style) | 421 | 199 | **52.7%** |
 | **Reflexion** (Self-Correction) | 410 | 219 | **46.6%** |
 
-On average, EnCompass reduces agent code by **~50%** while maintaining identical functional performance.
+On average, OpenEnCompass reduces agent code by **~50%** while maintaining identical functional performance.
 
 ## Mechanism
 
@@ -36,7 +38,7 @@ Standard LLM agents execute linearly:
 `State_t -> LLM -> Action -> State_{t+1}`.
 If the LLM errs, the trajectory fails.
 
-EnCompass compiles the agent code with **implicit yields** for cleaner syntax:
+OpenEnCompass compiles the agent code with **implicit yields** for cleaner syntax:
 ```python
 @encompass.compile
 def agent():
@@ -67,7 +69,7 @@ This enables **O(1) relative branching**: forking a process is just copying the 
 
 ## Search Strategies
 
-EnCompass decouples the *agent logic* (the generator) from the *search algorithm* (the driver).
+OpenEnCompass decouples the *agent logic* (the generator) from the *search algorithm* (the driver).
 
 **Beam Search**
 Maintains the `k` most promising execution traces at each step.
@@ -114,7 +116,7 @@ results = await strategy.search(agent)
 
 ## Implicit Yield Mechanism
 
-EnCompass features **automatic implicit yields** for cleaner, more intuitive code. Control signals (`branchpoint`, `record_score`), actions (via `@action`), and nested agents automatically checkpoint execution without explicit `yield` keywords.
+OpenEnCompass features **automatic implicit yields** for cleaner, more intuitive code. Control signals (`branchpoint`, `record_score`), actions (via `@action`), and nested agents automatically checkpoint execution without explicit `yield` keywords.
 
 **Traditional (still supported):**
 ```python
@@ -144,8 +146,8 @@ Requires Python 3.10+ and `ollama` for local inference.
 
 ```bash
 # 1. Clone and install dependencies
-git clone https://github.com/nitin966/encompass.git
-cd encompass
+git clone https://github.com/nitin966/OpenEnCompass.git
+cd OpenEnCompass
 pip install -r requirements.txt
 
 # 2. Install Ollama (for local LLMs)
@@ -162,7 +164,7 @@ ollama pull qwen2.5:32b
 
 ### Running Comparison Experiments
 
-You can run the comparison experiments to see the difference between base agents and EnCompass agents:
+You can run the comparison experiments to see the difference between base agents and OpenEnCompass agents:
 
 ```bash
 # 1. Code Translation Experiment
@@ -192,7 +194,7 @@ python run_benchmark.py --benchmark gsm8k_full --strategy beam --real-llm --mode
 python run_benchmark.py --benchmark gsm8k_full --strategy beam --real-llm --model qwen2.5:32b --width 8 --limit 100
 ```
 
-### Other Benchmarks (ARC, Reflexion)
+### Other Benchmarks (ARC, Reflexion, LiveCodeBench)
 
 ```bash
 # Reflexion (Code Generation + Self-Correction)
@@ -224,7 +226,7 @@ python -m unittest discover tests
 
 ## Compiler Capabilities
 
-EnCompass supports advanced Python features in agent code:
+OpenEnCompass supports advanced Python features in agent code:
 - **Control Flow**: `if/else`, `while`, `for`, `break`, `continue`, nested loops.
 - **Exceptions**: `try/except`, `raise`, exception propagation.
 - **Yield Expressions**: `x = yield branchpoint(...)`, `if (yield ...):`, `return (yield ...)`.
@@ -278,11 +280,11 @@ encompass/
    booktitle={Conference on Neural Information Processing Systems},
    year={2025}
  }
-@software{encompass2025,
+@software{openencompass2025,
   author = {Nitin Kesarwani},
-  title = {EnCompass: CPS Compiler for Search-Based LLM Agents},
+  title = {OpenEnCompass: CPS Compiler for Search-Based LLM Agents},
   year = {2025},
-  url = {https://github.com/nitin966/encompass},
+  url = {https://github.com/nitin966/OpenEnCompass},
   note = {Validated on GSM8K benchmark with depth 100+ search support}
 }
 ```
